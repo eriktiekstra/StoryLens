@@ -71,8 +71,9 @@ def signature(info):
 def fingerprint(path: Path, before) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
-        if signature(os.fstat(source.fileno())) != signature(before):
-            raise ValueError("Source changed before hashing")
+        opened = os.fstat(source.fileno())
+        if signature(opened) != signature(before):
+            raise ValueError(f"Source changed before hashing: path={signature(before)!r}, open={signature(opened)!r}")
         while chunk := source.read(1024 * 1024):
             digest.update(chunk)
         if signature(os.fstat(source.fileno())) != signature(before):
