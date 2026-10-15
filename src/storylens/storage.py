@@ -17,7 +17,7 @@ class Catalog:
         self.connection.row_factory = sqlite3.Row
         try:
             version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1):
+            if version not in (0, 1, 2):
                 raise ValueError(f"Unsupported catalog schema {version}; upgrade StoryLens")
             self.connection.execute("PRAGMA foreign_keys=ON")
             self.connection.execute("PRAGMA journal_mode=WAL")
@@ -38,7 +38,14 @@ class Catalog:
                     media_id TEXT NOT NULL REFERENCES media(id), stage TEXT NOT NULL,
                     error TEXT NOT NULL, attempted_at TEXT NOT NULL,
                     PRIMARY KEY(media_id, stage));
-                PRAGMA user_version=1;
+                CREATE TABLE IF NOT EXISTS transcripts (
+                    media_id TEXT NOT NULL PRIMARY KEY REFERENCES media(id),
+                    source_format TEXT NOT NULL,
+                    source_sha256 TEXT NOT NULL,
+                    language TEXT,
+                    imported_at TEXT NOT NULL,
+                    result TEXT NOT NULL);
+                PRAGMA user_version=2;
             """)
         except BaseException:
             self.connection.close()
@@ -78,6 +85,19 @@ class Catalog:
         with self.connection:
             self.connection.execute("INSERT OR REPLACE INTO failures VALUES(?,?,?,?)",
                                     (media_id, stage, error, now()))
+
+    def save_transcript(self, media_id, result):
+        with self.connection:
+            self.connection.execute("""INSERT OR REPLACE INTO transcripts
+                (media_id, source_format, source_sha256, language, imported_at, result)
+                VALUES(?,?,?,?,?,?)""",
+                (media_id, result["provenance"]["format"], result["provenance"]["source_sha256"],
+                 result.get("language"), now(), json.dumps(result, allow_nan=False)))
+
+    def transcript(self, media_id):
+        row = self.connection.execute(
+            "SELECT result FROM transcripts WHERE media_id=?", (media_id,)).fetchone()
+        return json.loads(row["result"]) if row is not None else None
 
     def image_results(self, cache_key):
         rows = self.connection.execute(

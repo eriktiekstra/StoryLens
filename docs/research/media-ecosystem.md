@@ -224,3 +224,47 @@ Retain `README.md` too (4,116 bytes; combined 815,876,043 bytes, approximately 7
 - **[INFERENCE] Unexecuted setup route:** explicitly acquire/checksum/extract that archive with `tar --zstd -xf` into a temporary prefix. Launch its `bin/ollama serve` using an isolated temporary `HOME` and `OLLAMA_MODELS`, `OLLAMA_HOST=127.0.0.1:11439`, `OLLAMA_NO_CLOUD=1`, `CUDA_VISIBLE_DEVICES=-1`, `ROCR_VISIBLE_DEVICES=-1` and `OLLAMA_VULKAN=0`. [Official GPU guidance](https://docs.ollama.com/gpu) prescribes invalid GPU IDs for CPU execution. Observe status `cloud.disabled:true` before any inference, deliberately pull only the chosen local model, verify its digest/capabilities/no remote metadata, then exercise the provider with a local image. Model pulls are explicit acquisition, not cloud inference or an automatic fallback.
 - The official [moondream:latest registry manifest](https://registry.ollama.ai/v2/library/moondream/manifests/latest) was **`55fc3abd386771e5b5d1bbcc732f3c3f4df6e9f9f08f1131f9cc27ba2d1eec5b`** (response digest header and SHA-256 of manifest bytes agree). Layers plus config total **1,738,451,197 bytes**: model 828,661,152 bytes, projector 909,777,984 bytes, plus license/template/parameters/config. Its [config](https://registry.ollama.ai/v2/library/moondream/blobs/sha256:ba5fbb481ada654c85475473fa862b81eb5539cecc56da57f90ef5af56798be2) declares GGUF Q4_0 and families phi2/clip; the [license layer](https://registry.ollama.ai/v2/library/moondream/blobs/sha256:c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) contains Apache License 2.0. A mutable pull tag must be checked against the observed full digest; actual `/api/show` vision capability and CPU inference compatibility remain runtime acceptance checks, not facts established merely by this metadata. No Ollama runtime/archive or model weights were downloaded by this research worker.
 
+## M4 addendum: local audio model adapters
+
+Research date: 2026-10-15. These findings support the `storylens.audio_providers` implementation; they are not a full quality benchmark.
+
+### faster-whisper local transcription
+
+- Verified: faster-whisper loads an explicit local directory with `local_files_only=True` and `device="cpu"`/`"cuda"`; `compute_type="int8"` for CPU and `"float16"` for CUDA are the documented type choices [17]. The `transcribe` method returns lazy generators; consuming the iterator is required before inspecting results. Word timestamps and language probability are exposed directly by the Whisper model [17]. The bundled Silero VAD is available through `faster_whisper.vad.get_speech_timestamps` using a numpy float32 array normalized to [-1, 1] [17, source].
+- Version trap: faster-whisper 1.2.1's `audio.decode_audio` calls PyAV's `av.open(..., metadata_errors="ignore")`. Current PyAV 14.x removed `metadata_errors`, so the caller must pin a compatible PyAV version (e.g., `av==12.3.0`) or patch `decode_audio` [17, source].
+- Verified model snapshot: `Systran/faster-whisper-tiny.en` revision `0d3d19a32d3338f10357c0889762bd8d64bbdeba` is ungated; its public metadata reports MIT license and English-only ASR. Downloaded files and SHA-256 obtained during this work:
+
+| File | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `config.json` | 2,317 | `14b1b421a90349bc551b881461426b561a874049cb9e4c4864f2ca384f6a7cc5` |
+| `model.bin` | 75,537,502 | `1a5afae06a4db91c975c9a9d78be5cc110ee4ea022ad57d55492e4550e936b2a` |
+| `tokenizer.json` | 2,128,466 | downloaded |
+| `vocabulary.txt` | 422,309 | downloaded |
+
+These hashes are evidence of the files used for the smoke test, not a guarantee of upstream integrity.
+
+**[INFERENCE]** Do not use `device="auto"`, do not allow model-name download fallback, and do not rely on VAD to certify that every returned word was actually spoken. Return raw `language_probability` from the model and actual Silero VAD intervals separately. Offset all segment and word times by the decoded source origin seconds.
+
+### pyannote.audio local diarization
+
+- Verified: `pyannote.audio.Pipeline.from_pretrained` accepts a local directory containing `config.yaml`, local subfolder references, or a dict config; local paths reject the `revision` argument [source]. Telemetry is sent through `track_pipeline_init`/`track_pipeline_apply`; setting `PYANNOTE_METRICS_ENABLED=0` disables it [20, source].
+- Verified: the diarization output is an `Annotation` object whose `itertracks(yield_label=True)` yields `(Segment, track, label)` tuples. Speaker labels are arbitrary cluster names produced for that run [20, source].
+
+**[INFERENCE]** Load only an explicitly supplied local pipeline directory; deny network before import. Preserve overlapping turns as independent intervals; never assign speaker labels as identities or map them onto transcript words without an explicit alignment step.
+
+### Transformers sound classification
+
+- Verified: `AutoModelForAudioClassification.from_pretrained(..., local_files_only=True)` plus `AutoFeatureExtractor.from_pretrained(..., local_files_only=True)` load a local directory. The pipeline defaults to `top_k=5` and `function_to_apply="softmax"`; it supports `"sigmoid"` and `"none"`. For multi-label classification, `config.problem_type == "multi_label_classification"` selects sigmoid post-processing [source]. The feature extractor exposes a target `sampling_rate`; input arrays must match it or be resampled.
+
+**[INFERENCE]** Load local directory only, run offline, disclose that scores are uncalibrated model outputs, and report the activation used. Do not present softmax scores as calibrated event probabilities.
+
+### Isolation and network denial
+
+- Verified: Python's `sys.addaudithook` can raise on `urllib.Request` and `socket.connect` events. Audit hooks fire after the action is initiated; they are a best-effort signal, not a kernel firewall. Complement them with offline environment variables (`HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `HF_DATASETS_OFFLINE`, `HF_HUB_DISABLE_TELEMETRY`, `PYANNOTE_METRICS_ENABLED=0`, `DO_NOT_TRACK`) set before importing any ML library [source, docs].
+
+**[INFERENCE]** Run audio inference in a separate subprocess with offline env and an audit hook; use `start_new_session=True` plus process-group kill for timeout/cancellation so child threads and spawned worker processes are reaped. A subprocess boundary also prevents model libraries from mutating the parent process or accidentally retaining cached state.
+
+### Verified smoke prerequisites
+
+This worker installed faster-whisper 1.2.1, pyannote.audio, transformers and a compatible PyAV (`av==12.3.0`) in the project's `.venv` for testing only; those are optional extras, not base dependencies. It explicitly downloaded `Systran/faster-whisper-tiny.en` to `/tmp/storylens-fw-tiny-en` and ran a CPU transcription smoke on a local synthetic voiced WAV with `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`, producing English language detection, one segment, and one Silero VAD interval.
+

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 — 2026-10-15 (M4 audio/transcripts)
+
+- Added bounded standalone audio technical analysis: signal energy, RMS dBFS, peak amplitude, digital silence, clipping fraction, silence segments and source-time provenance with stream-origin preservation.
+- Added timestamped transcript import, persistence and round-trip export for SRT/VTT/JSON with optional offset/language override and independent cache keys.
+- Added opt-in local audio inference adapters (faster-whisper transcription, pyannote.audio diarization, transformers sound classification) using explicitly installed model directories only; no automatic downloads, no cloud access, network-denied out-of-process worker.
+- Added `transcript` CLI command, `audio_transcription_*` configuration, audio stage selection in `analyze`, schema additions for audio/transcript stages and failure envelopes.
+- Provenance records model digest, runtime/library versions, device, preprocessing and privacy settings; missing optional dependencies are recorded as `None` so result-shape tests can run without installed weights.
+- 125 deterministic tests pass; real FFmpeg-generated audio fixtures exercise origin offsets, clipping, silence and resampled decoded audio. CLI smoke verified transcript import and audio technical analysis.
+
+Audio models are optional and must be installed locally; transcription quality depends on the chosen Faster-Whisper revision. Events/feedback, durable jobs/MCP and storyboards remain later milestones.
+
 ## 0.3.0 — 2026-10-15 (M3 local semantics)
 
 - Added opt-in local CPU Transformers CLIP/SigLIP image/text embeddings from explicit installed model directories, with content/library/preprocessing identities, finite normalized vectors and no automatic downloads/remote code.

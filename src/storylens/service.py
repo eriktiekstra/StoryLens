@@ -1,11 +1,16 @@
 """Shared application service, independent of CLI and editor transports."""
 
+import hashlib
+import json
 from pathlib import Path
 
+from .audio_analysis import AudioTechnicalExtractor
+from .audio_providers import AudioModelExtractor
 from .config import Config
 from .ingest import discover, fingerprint, kind, signature, snapshot
 from .metadata import MetadataExtractor
 from .storage import Catalog
+from .transcripts import load_transcript, serialize
 
 
 class Analyzer:
@@ -14,6 +19,7 @@ class Analyzer:
         self.catalog = Catalog(config.database)
         self.extractor = MetadataExtractor(config.ffprobe, config.timeout)
         self.artifact_root = config.database.resolve().with_suffix(".artifacts")
+        self._audio_extractor = None
         self._image_extractor = None
         self._video_extractor = None
         self._embeddings = None
@@ -39,6 +45,12 @@ class Analyzer:
                     timeout=self.config.timeout, scene_threshold=self.config.scene_threshold,
                     minimum_scene_seconds=self.config.minimum_scene_seconds, max_scenes=self.config.max_scenes)
             return "video_technical", self._video_extractor
+        if media_kind == "audio":
+            if self._audio_extractor is None:
+                self._audio_extractor = AudioTechnicalExtractor(
+                    ffmpeg=self.config.ffmpeg, ffprobe=self.config.ffprobe,
+                    timeout=self.config.timeout, max_audio_seconds=self.config.max_audio_seconds)
+            return "audio_technical", self._audio_extractor
         return None
 
     @staticmethod
@@ -49,8 +61,10 @@ class Analyzer:
                    for scene in result["scenes"])
 
     def scan(self, root: Path, *, analyze=False, force=False, stage="all", depth=None):
-        if stage not in {"metadata", "technical", "semantic", "all"}:
-            raise ValueError("stage must be metadata, technical, semantic or all")
+        if stage not in {"metadata", "technical", "semantic", "transcript", "all"}:
+            raise ValueError("stage must be metadata, technical, semantic, transcript or all")
+        if stage == "transcript" and not self.config.audio_transcription_model:
+            raise ValueError("audio_transcription_model is required for transcript stage")
         from .semantics import DEPTHS
         if depth is not None and depth not in DEPTHS:
             raise ValueError("depth must be fast, standard or deep")
@@ -96,7 +110,7 @@ class Analyzer:
             selected = []
             if stage in {"metadata", "all"}:
                 selected.append(("metadata", self.extractor))
-            if stage in {"technical", "all"} or (stage == "semantic" and kind(entry) == "video"):
+            if stage in {"technical", "all"} or (stage == "semantic" and kind(entry) in {"video", "audio"}):
                 technical = self._technical(kind(entry))
                 if technical is not None:
                     selected.append(technical)
@@ -104,6 +118,8 @@ class Analyzer:
                 selected.append(("semantic_embeddings", None))
                 if depth != "fast":
                     selected.append(("semantic_vision", None))
+            if kind(entry) == "audio" and self.config.audio_transcription_model and stage in {"transcript", "all"}:
+                selected.append(("audio_transcription", None))
             file_failed, computed, hits = False, False, 0
             failed_stages = set()
             for stage_name, extractor in selected:
@@ -122,6 +138,14 @@ class Analyzer:
                                 raise ValueError("Video semantics requires successful current video technical analysis")
                         task = stage_name.removeprefix("semantic_")
                         extractor = SemanticExtractor(self._semantic_provider(task), depth, task, video, video_key)
+                    if stage_name == "audio_transcription":
+                        extractor = AudioModelExtractor(
+                            "transcription", self.config.audio_transcription_model,
+                            ffmpeg=self.config.ffmpeg, ffprobe=self.config.ffprobe,
+                            timeout=self.config.timeout,
+                            max_audio_seconds=self.config.max_audio_seconds,
+                            device=self.config.audio_transcription_device,
+                            language=self.config.audio_transcription_language)
                     if signature(snapshot(entry)) != signature(before):
                         raise ValueError("Source changed before stage execution")
                     key = extractor.cache_key(kind(entry)) if stage_name == "metadata" else extractor.cache_key()
@@ -157,6 +181,35 @@ class Analyzer:
             summary["analyzed"] += int(computed)
             summary["cache_hits"] += int(bool(selected) and hits == len(selected))
         return summary
+
+    @staticmethod
+    def _transcript_cache_key(result):
+        provenance = result["provenance"]
+        return hashlib.sha256(json.dumps({
+            "sha256": provenance["source_sha256"],
+            "format": provenance["format"],
+            "offset": provenance["offset_seconds"],
+            "language": result.get("language")}, sort_keys=True).encode()).hexdigest()
+
+    def import_transcript(self, media_id, path, format=None, offset=0, language=None):
+        # Ensure the media identity exists before attaching imported evidence.
+        self.catalog.get(media_id)
+        result = load_transcript(Path(path), format=format, offset=offset, language=language)
+        key = self._transcript_cache_key(result)
+        self.catalog.save(media_id, "transcript", key, result)
+        self.catalog.save_transcript(media_id, result)
+        return result
+
+    def show(self, media_id):
+        return {"schema_version": "1.0", "media": self.catalog.get(media_id)}
+
+    def transcript(self, media_id, *, format="json"):
+        stored = self.catalog.transcript(media_id)
+        if stored is None:
+            raise ValueError("No transcript imported for media ID: " + media_id)
+        if format == "json":
+            return stored
+        return serialize(stored, format)
 
     def _semantic_provider(self, task):
         from .providers import LocalEmbeddings, OllamaVision

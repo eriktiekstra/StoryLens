@@ -33,6 +33,10 @@ class Config:
     vision_model: str = ""
     ollama_endpoint: str = "http://127.0.0.1:11434"
     semantic_timeout: float = 120.0
+    max_audio_seconds: float = 1800.0
+    audio_transcription_model: str = ""
+    audio_transcription_device: str = "cpu"
+    audio_transcription_language: str = ""
 
 
 def load_config(path: Path | None = None, **overrides) -> Config:
@@ -58,7 +62,7 @@ def load_config(path: Path | None = None, **overrides) -> Config:
                 value = value.split(os.pathsep) if value else []
             elif name == "max_scenes":
                 value = int(value)
-            elif name in {"timeout", "semantic_timeout", "scene_threshold", "minimum_scene_seconds"}:
+            elif name in {"timeout", "semantic_timeout", "scene_threshold", "minimum_scene_seconds", "max_audio_seconds"}:
                 value = float(value)
             values[name] = value
     values.update({key: value for key, value in overrides.items() if value is not None})
@@ -84,9 +88,20 @@ def load_config(path: Path | None = None, **overrides) -> Config:
     semantic_timeout = values.get("semantic_timeout", 120.0)
     if isinstance(semantic_timeout, bool) or not isinstance(semantic_timeout, (int, float)) or not math.isfinite(semantic_timeout) or semantic_timeout <= 0:
         raise ValueError("semantic_timeout must be a finite positive number")
-    for name in ("embedding_model", "vision_model", "ollama_endpoint"):
+    for name in ("embedding_model", "vision_model", "ollama_endpoint", "audio_transcription_model", "audio_transcription_device", "audio_transcription_language"):
         if not isinstance(values.get(name, ""), str):
             raise ValueError(name + " must be a string")
+    max_audio_seconds = values.get("max_audio_seconds", 1800.0)
+    if isinstance(max_audio_seconds, bool) or not isinstance(max_audio_seconds, (int, float)) or not math.isfinite(max_audio_seconds) or max_audio_seconds <= 0:
+        raise ValueError("max_audio_seconds must be a finite positive number")
+    if max_audio_seconds > 1800:
+        raise ValueError("max_audio_seconds must not exceed 1800")
+    device = values.get("audio_transcription_device", "cpu")
+    if device not in ("cpu", "cuda"):
+        raise ValueError("audio_transcription_device must be cpu or cuda")
+    language = values.get("audio_transcription_language", "")
+    if len(language) > 32:
+        raise ValueError("audio_transcription_language must be at most 32 characters")
     max_scenes = values.get("max_scenes", 256)
     if type(max_scenes) is not int or max_scenes < 1:
         raise ValueError("max_scenes must be a positive integer")

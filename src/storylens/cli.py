@@ -26,6 +26,10 @@ def parser():
     cli.add_argument("--vision-model", help="Installed local Ollama vision model")
     cli.add_argument("--ollama-endpoint", help="Numeric loopback Ollama URL")
     cli.add_argument("--semantic-timeout", type=float, help="Ollama HTTP request timeout in seconds")
+    cli.add_argument("--max-audio-seconds", type=float, help="Maximum audio duration to decode for technical or transcription analysis")
+    cli.add_argument("--audio-transcription-model", help="Local directory of an installed Faster-Whisper model")
+    cli.add_argument("--audio-transcription-device", choices=("cpu", "cuda"), help="Device for local transcription inference")
+    cli.add_argument("--audio-transcription-language", help="ISO language code hint for transcription, or empty for auto-detect")
     cli.add_argument("--exclude", action="append", dest="exclusions", help="Glob against relative path or basename; replaces configured exclusions")
     cli.add_argument("--trust-stat", action=argparse.BooleanOptionalAction, default=None, help="Reuse identity for matching size/mtime (weaker than hashing)")
     cli.add_argument("--json", action="store_true", help="Machine-readable versioned JSON")
@@ -35,7 +39,7 @@ def parser():
         command.add_argument("path", type=Path)
         if name == "analyze":
             command.add_argument("--force", action="store_true", help="Recompute the selected stages even when cached")
-            command.add_argument("--stage", choices=("metadata", "technical", "semantic", "all"), default="all")
+            command.add_argument("--stage", choices=("metadata", "technical", "semantic", "transcript", "all"), default="all")
             command.add_argument("--depth", choices=("fast", "standard", "deep"), help="Opt into semantic stages; semantic-only defaults to standard")
     for name in ("list", "export"):
         command = commands.add_parser(name, help="Page through media identities" if name == "list" else "Export one bounded page including analysis")
@@ -44,6 +48,12 @@ def parser():
         command.add_argument("--kind", choices=("image", "video", "audio"))
     show = commands.add_parser("show", help="Get stored metadata and file references")
     show.add_argument("media_id")
+    transcript = commands.add_parser("transcript", help="Import a transcript file for a catalogued media ID")
+    transcript.add_argument("--media-id", required=True, help="Media identity the transcript describes")
+    transcript.add_argument("--format", choices=("json", "srt", "vtt"), help="Input transcript format (default: inferred from path)")
+    transcript.add_argument("--offset", type=float, default=0, help="Seconds added to every imported timestamp")
+    transcript.add_argument("--language", help="Override or supply transcript language")
+    transcript.add_argument("path", type=Path, help="Transcript file to import")
     duplicates = commands.add_parser("duplicates", help="Find exact copies or conservative image near-duplicates")
     duplicates.add_argument("--mode", choices=("exact", "near"), default="exact")
     duplicates.add_argument("--distance", type=int, default=6, help="Maximum perceptual hash distance for near mode")
@@ -85,7 +95,9 @@ def main(argv=None):
                              timeout=args.timeout, exclusions=args.exclusions, trust_stat=args.trust_stat,
                              scene_threshold=args.scene_threshold, minimum_scene_seconds=args.minimum_scene_seconds, max_scenes=args.max_scenes,
                              embedding_model=args.embedding_model, vision_model=args.vision_model,
-                             ollama_endpoint=args.ollama_endpoint, semantic_timeout=args.semantic_timeout)
+                             ollama_endpoint=args.ollama_endpoint, semantic_timeout=args.semantic_timeout,
+                             max_audio_seconds=args.max_audio_seconds, audio_transcription_model=args.audio_transcription_model,
+                             audio_transcription_device=args.audio_transcription_device, audio_transcription_language=args.audio_transcription_language)
         with Analyzer(config) as storylens:
             if args.command in ("scan", "analyze"):
                 result = storylens.scan(args.path, analyze=args.command == "analyze", force=getattr(args, "force", False),
@@ -97,7 +109,14 @@ def main(argv=None):
             elif args.command == "scenes":
                 result = storylens.scenes(args.media_id, limit=args.limit, after=args.after)
             elif args.command == "show":
-                result = {"schema_version": "1.0", "media": storylens.catalog.get(args.media_id)}
+                result = storylens.show(args.media_id)
+            elif args.command == "transcript":
+                result = storylens.import_transcript(args.media_id, args.path, format=args.format,
+                                                     offset=args.offset, language=args.language)
+                if args.format in ("srt", "vtt"):
+                    from storylens.transcripts import serialize
+                    print(serialize(result, args.format), end="")
+                    return 0
             else:
                 result = {"schema_version": "1.0", **storylens.catalog.page(args.limit, args.after, args.kind)}
                 if args.command == "export":

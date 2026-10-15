@@ -2,7 +2,7 @@
 
 ## MVP boundary
 
-**M1, M2 and M3 are implemented**: local/NAS ingestion, metadata, independently cached image/video technical measurements, exact/near-duplicate candidates, timestamped scenes/JPEGs, bounded frame/audio signals, opt-in local CLIP/SigLIP retrieval and evidence-linked Ollama descriptions. This is not the complete semantic product: transcription, jobs/MCP, events, feedback and storyboards remain future work. Never expose fake implementations for these.
+**M1, M2, M3 and M4 are implemented**: local/NAS ingestion, metadata, independently cached image/video technical measurements, exact/near-duplicate candidates, timestamped scenes/JPEGs, bounded frame/audio signals, opt-in local CLIP/SigLIP retrieval and evidence-linked Ollama descriptions, timestamped transcript import/export, and opt-in local faster-whisper/pyannote.audio/transformers audio inference. This is not the complete semantic product: jobs/MCP, events, feedback and storyboards remain future work. Never expose fake implementations for these.
 
 ## Milestones
 
@@ -11,7 +11,7 @@
 | M1 — foundation (complete) | Python package; recursive read-only ingest/exclusions; full fingerprints; SQLite paths/media/stage cache; image + audio/video metadata; TOML/env/CLI; paginated list/show/export; docs | Synthetic image/audio/video CLI smoke; move/cache/change tests; corrupt-file isolation; source hashes unchanged; configuration and CLI tests |
 | M2 — technical (complete) | Image sharpness/exposure/noise; exact/near duplicates; timestamped scene boundaries, representative frames and initial video/audio measurements | Blur/exposure/duplicate fixtures; VFR and rotation timing fixtures; no quality-based automatic discard |
 | M3 — local semantics (complete) | Ollama vision and local CLIP/SigLIP embeddings; natural-language/image similarity; selected-frame descriptions; real FAST/STANDARD/DEEP coverage | Offline installed SigLIP CPU image/text smoke; real cloud-disabled Ollama/Moondream captions; depth/source-time evidence tests; same-space retrieval evaluation; real model-content cache invalidation without metadata/technical invalidation |
-| M4 — audio (next) | Import existing timestamped transcripts first; optional faster-whisper; speech/silence/quality; separate optional diarization and sound classifiers | Multilingual timing fixtures; import roundtrip; missing GPU/model/timeout behavior; no required cloud access |
+| M4 — audio (complete) | Import existing timestamped transcripts first; optional faster-whisper; speech/silence/quality; separate optional diarization and sound classifiers | Multilingual timing fixtures; import roundtrip; missing GPU/model/timeout behavior; no required cloud access |
 | M5 — agent API | Official SDK MCP stdio; durable start/status/cancel/resume jobs; result pages, schema files; Codex/Claude setup | SDK client protocol tests; restart/cancellation and path authorization; real CLI/MCP parity smoke |
 | M6 — events and feedback | Time/GPS/semantic grouping; titles with provenance; manual corrections and preferences independent of AI data | Avoid over-fragmentation evaluation; explicit timezone ambiguity; feedback survives reanalysis |
 | M7 — recommendations | Separate technical/relevance/story scores; configurable strategies; editable portable storyboard with duration/required/excluded media | Source-time bounds, required/excluded invariants, meaningful conversation preservation, deterministic budget behavior |

@@ -388,6 +388,37 @@
         "ranking"
       ],
       "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "1.0"
+        },
+        "provenance": {
+          "type": "object"
+        },
+        "source_timing": {
+          "type": "object"
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "segments": {
+          "type": "array"
+        }
+      },
+      "required": [
+        "schema_version",
+        "provenance",
+        "source_timing",
+        "language",
+        "segments"
+      ],
+      "additionalProperties": true
     }
   ],
   "$defs": {
@@ -562,6 +593,15 @@
             },
             "semantic_vision": {
               "$ref": "#/$defs/vision_stage"
+            },
+            "audio_technical": {
+              "$ref": "#/$defs/audio_technical_stage"
+            },
+            "audio_transcription": {
+              "$ref": "#/$defs/audio_transcription_stage"
+            },
+            "transcript": {
+              "$ref": "#/$defs/transcript_stage"
             }
           },
           "required": [],
@@ -1055,6 +1095,230 @@
             "caveats"
           ],
           "additionalProperties": false
+        }
+      },
+      "required": [
+        "cache_key",
+        "analyzed_at",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "transcript": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "1.0"
+        },
+        "provenance": {
+          "type": "object"
+        },
+        "source_timing": {
+          "type": "object"
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "segments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "start_seconds": {
+                "type": "number"
+              },
+              "end_seconds": {
+                "type": "number"
+              },
+              "text": {
+                "type": "string"
+              },
+              "speaker": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "words": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "start_seconds": {
+                      "type": "number"
+                    },
+                    "end_seconds": {
+                      "type": "number"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "probability": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "start_seconds",
+                    "end_seconds",
+                    "text"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "index",
+              "start_seconds",
+              "end_seconds",
+              "text",
+              "words"
+            ],
+            "additionalProperties": true
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "provenance",
+        "source_timing",
+        "language",
+        "segments"
+      ],
+      "additionalProperties": true
+    },
+    "transcript_stage": {
+      "type": "object",
+      "properties": {
+        "cache_key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "analyzed_at": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/transcript"
+        }
+      },
+      "required": [
+        "cache_key",
+        "analyzed_at",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "audio_technical": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "1.0"
+        },
+        "provenance": {
+          "type": "object"
+        },
+        "status": {
+          "enum": [
+            "measured",
+            "no_audio"
+          ]
+        },
+        "source_timing": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "measurements": {
+          "type": "object"
+        },
+        "segments": {
+          "type": "array"
+        }
+      },
+      "required": [
+        "schema_version",
+        "provenance",
+        "status",
+        "source_timing",
+        "measurements",
+        "segments"
+      ],
+      "additionalProperties": true
+    },
+    "audio_technical_stage": {
+      "type": "object",
+      "properties": {
+        "cache_key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "analyzed_at": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/audio_technical"
+        }
+      },
+      "required": [
+        "cache_key",
+        "analyzed_at",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "audio_transcription": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "provenance": {
+          "type": "object"
+        },
+        "source_timing": {
+          "type": "object"
+        },
+        "language": {
+          "type": "string"
+        },
+        "segments": {
+          "type": "array"
+        },
+        "speech_activity": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "provenance",
+        "source_timing",
+        "language",
+        "segments"
+      ],
+      "additionalProperties": true
+    },
+    "audio_transcription_stage": {
+      "type": "object",
+      "properties": {
+        "cache_key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "analyzed_at": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/audio_transcription"
         }
       },
       "required": [
