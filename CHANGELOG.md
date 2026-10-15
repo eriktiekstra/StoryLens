@@ -8,6 +8,7 @@
 - Added same-space text/image search with exact cosine top-N ranking, best-frame evidence and explicit depth/model isolation. No factual confidence, identity/event inference or story score is fabricated.
 - Extended CLI, configuration, JSON Schema, architecture/privacy/setup docs and optional runtime dependencies. 78 deterministic tests pass on Linux; CPU SigLIP inference and a cloud-disabled Ollama 0.40.4/Moondream caption were exercised with real installed weights. Package installation/help and wheel build succeed.
 - Fixed cross-platform catalog lookups for canonicalized filesystem paths and deferred default-database resolution until configuration validation, so explicit config works without home-directory environment variables.
+- Fixed Windows Python 3.12 hashing: path-stat creation times and descriptor-stat change times are checked separately, retaining source identity and before/after mutation checks. CI now runs the entire OS/Python matrix without cancelling sibling jobs and includes scan/CLI failure details.
 
 Model quality remains a separate evaluation problem: captions may hallucinate (including a border on a plain-color fixture). No universal accelerator/platform/NAS performance or multilingual accuracy claim. Transcript import/transcription, MCP/jobs, grouping/feedback and storyboards remain later milestones.
 

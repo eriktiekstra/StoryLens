@@ -72,11 +72,15 @@ def fingerprint(path: Path, before) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
         opened = os.fstat(source.fileno())
-        if signature(opened) != signature(before):
-            raise ValueError(f"Source changed before hashing: path={signature(before)!r}, open={signature(opened)!r}")
+        # Windows Python 3.12 path stat uses creation time for ctime, while
+        # fstat uses change time. Compare ctime only within the same stat API.
+        if (not os.path.samestat(opened, before) or opened.st_size != before.st_size
+                or opened.st_mtime_ns != before.st_mtime_ns
+                or signature(snapshot(path)) != signature(before)):
+            raise ValueError("Source changed before hashing")
         while chunk := source.read(1024 * 1024):
             digest.update(chunk)
-        if signature(os.fstat(source.fileno())) != signature(before):
+        if signature(os.fstat(source.fileno())) != signature(opened):
             raise ValueError("Source changed during hashing")
     if signature(snapshot(path)) != signature(before):
         raise ValueError("Source changed during hashing")

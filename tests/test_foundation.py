@@ -1,5 +1,6 @@
 """Generated media only: no private or externally licensed fixture assets."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -10,11 +11,13 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 import wave
 
 from PIL import Image
 
 from storylens.config import Config, load_config
+from storylens.ingest import fingerprint, snapshot
 from storylens.metadata import MetadataExtractor
 from storylens.service import Analyzer
 
@@ -80,6 +83,25 @@ class FoundationTests(unittest.TestCase):
             result = app.scan(self.media, analyze=True, stage="metadata")
             self.assertNotEqual(app.catalog.known_path(source)["media_id"], identity)
             self.assertEqual(result["analyzed"], 1)
+
+    def test_hash_handles_distinct_ctime_semantics_without_missing_changes(self):
+        source = self.image()
+        before = snapshot(source)
+        fields = {name: getattr(before, name) for name in
+                  ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")}
+        opened = SimpleNamespace(**{**fields, "st_ctime_ns": fields["st_ctime_ns"] + 100})
+        with patch("storylens.ingest.os.fstat", return_value=opened):
+            self.assertEqual(fingerprint(source, before),
+                             "sha256:" + hashlib.sha256(source.read_bytes()).hexdigest())
+        changed = SimpleNamespace(**{**vars(opened), "st_ctime_ns": opened.st_ctime_ns + 1})
+        with patch("storylens.ingest.os.fstat", side_effect=[opened, changed]):
+            with self.assertRaisesRegex(ValueError, "Source changed during hashing"):
+                fingerprint(source, before)
+        for field in ("st_dev", "st_ino", "st_size", "st_mtime_ns"):
+            replaced = SimpleNamespace(**{**vars(opened), field: getattr(opened, field) + 1})
+            with self.subTest(field=field), patch("storylens.ingest.os.fstat", return_value=replaced):
+                with self.assertRaisesRegex(ValueError, "Source changed before hashing"):
+                    fingerprint(source, before)
 
     def test_stage_version_and_force_invalidation(self):
         self.image()
