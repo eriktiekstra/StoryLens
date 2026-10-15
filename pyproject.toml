@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "storylens"
+version = "0.2.0"
+description = "Local-first, read-only media indexing and analysis"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = ["Pillow>=11,<13", "numpy>=1.26,<3"]
+
+[project.optional-dependencies]
+heif = ["pillow-heif>=1,<2"]
+
+[project.scripts]
+storylens = "storylens.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

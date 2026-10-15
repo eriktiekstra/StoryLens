@@ -1,0 +1,10 @@
+[storylens]
+# Fully local indexing and technical analysis; no inference/network requests.
+ffprobe = "ffprobe"
+ffmpeg = "ffmpeg"
+timeout = 30.0
+scene_threshold = 0.3
+minimum_scene_seconds = 0.5
+max_scenes = 256
+exclusions = ["@eaDir", ".snapshot"]
+trust_stat = false
