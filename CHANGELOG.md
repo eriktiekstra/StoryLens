@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 — 2026-10-15 (M3 local semantics)
+
+- Added opt-in local CPU Transformers CLIP/SigLIP image/text embeddings from explicit installed model directories, with content/library/preprocessing identities, finite normalized vectors and no automatic downloads/remote code.
+- Added bounded, metadata-free EXIF-corrected frame input and a direct loopback-only Ollama vision adapter. Installed-model capabilities/digests, daemon cloud-disabled status and runtime versions are enforced; redirects, proxies, remote aliases and model/runtime mutation fail explicitly.
+- Added independent semantic_embeddings/semantic_vision caches and FAST/STANDARD/DEEP frame coverage with absolute source-time evidence. Default analysis stays inference-free; failed video prerequisites cannot authorize stale-frame semantic extraction.
+- Added same-space text/image search with exact cosine top-N ranking, best-frame evidence and explicit depth/model isolation. No factual confidence, identity/event inference or story score is fabricated.
+- Extended CLI, configuration, JSON Schema, architecture/privacy/setup docs and optional runtime dependencies. 78 deterministic tests pass on Linux; CPU SigLIP inference and a cloud-disabled Ollama 0.40.4/Moondream caption were exercised with real installed weights. Package installation/help and wheel build succeed.
+- Fixed cross-platform catalog lookups for canonicalized filesystem paths and deferred default-database resolution until configuration validation, so explicit config works without home-directory environment variables.
+
+Model quality remains a separate evaluation problem: captions may hallucinate (including a border on a plain-color fixture). No universal accelerator/platform/NAS performance or multilingual accuracy claim. Transcript import/transcription, MCP/jobs, grouping/feedback and storyboards remain later milestones.
+
 ## 0.2.0 — 2026-10-15 (StoryLens / M2 technical analysis)
 
 - Completed the StoryLens cutover across package/imports, CLI, configuration/environment, storage defaults, documentation, license notices and checkout directory. No compatibility aliases remain.

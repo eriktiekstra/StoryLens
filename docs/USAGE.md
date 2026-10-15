@@ -7,14 +7,15 @@ Global options precede the command: storylens [OPTIONS] COMMAND ... .
 | Command | Behavior |
 | --- | --- |
 | scan PATH | Recursively index recognized files and full SHA-256 identities; no media decode |
-| analyze PATH [--stage all/metadata/technical] [--force] | Independently cached metadata and applicable image/video technical stages; all is the default |
+| analyze PATH [--stage all/metadata/technical/semantic] [--depth fast/standard/deep] [--force] | Independently cached stages; all defaults to metadata+technical, depth explicitly opts into semantics; semantic-only defaults to standard |
 | list [--kind image/video/audio] [--limit N] [--after CURSOR] | Bounded identity page; default 50, maximum 500 |
 | show MEDIA_ID | Last successful result per stage, provenance, path observations and failures |
 | export [--kind KIND] [--limit N] [--after CURSOR] | JSON page including paths and analysis; follow next_cursor until null |
 | duplicates [--mode exact/near] [--distance 0..64] [--limit N] [--after CURSOR] | Exact byte-identity groups or conservative image near-duplicate pairs; exact is default |
 | scenes MEDIA_ID [--limit N] [--after CURSOR] | Timestamped scenes and representative JPEG references from stored video analysis |
+| search (--text QUERY / --image PATH) [--depth fast/standard/deep] [--limit N] | Top same-space cosine matches from stored embeddings; default depth standard, limit20 (max500); no pagination |
 
-Global options: --config FILE, --database FILE, --ffprobe EXECUTABLE, --ffmpeg EXECUTABLE, --timeout SECONDS, --scene-threshold NUMBER, --minimum-scene-seconds NUMBER, --max-scenes N, repeatable --exclude PATTERN, --trust-stat / --no-trust-stat, --json, --version. Help is available per command.
+Global options: --config FILE, --database FILE, --ffprobe EXECUTABLE, --ffmpeg EXECUTABLE, --timeout SECONDS, --scene-threshold NUMBER, --minimum-scene-seconds NUMBER, --max-scenes N, --embedding-model DIRECTORY, --vision-model NAME, --ollama-endpoint ORIGIN, --semantic-timeout SECONDS, repeatable --exclude PATTERN, --trust-stat / --no-trust-stat, --json, --version. Help is available per command.
 
 Exclusions replace configured patterns. Each matches a POSIX-style relative path or basename, case sensitively; matching directories are pruned. Use --exclude 'private' to prune any directory with that name. No gitignore syntax, negation or regex is implied. Traversed symlink entries are skipped; explicitly selected roots are resolved to their real target. The current catalog's derived-artifact subtree is excluded from source ingestion even if the catalog is within the chosen scan root.
 
@@ -37,9 +38,14 @@ minimum_scene_seconds = 0.5
 max_scenes = 256
 exclusions = ["private", "@eaDir", ".snapshot"]
 trust_stat = false
+# Optional: only used when semantic stages/search are explicitly requested.
+embedding_model = "/absolute/models/siglip"
+vision_model = "moondream:latest"
+ollama_endpoint = "http://127.0.0.1:11434"
+semantic_timeout = 120.0
 ~~~
 
-Unknown keys, invalid booleans, nonpositive/nonfinite timeouts and scene spacing, threshold outside (0,1], and nonpositive/noninteger max_scenes fail. Environment variables use STORYLENS_ plus the uppercase setting name: DATABASE, FFPROBE, FFMPEG, TIMEOUT, SCENE_THRESHOLD, MINIMUM_SCENE_SECONDS, MAX_SCENES, EXCLUSIONS, TRUST_STAT. Exclusions use OS path separators (colon POSIX, semicolon Windows); use TOML/CLI for patterns containing that separator. TRUST_STAT accepts true/false. No credentials are needed.
+Unknown keys, invalid booleans, nonpositive/nonfinite timeouts and scene spacing, threshold outside (0,1], and nonpositive/noninteger max_scenes fail. Environment variables use STORYLENS_ plus each uppercase setting name, including EMBEDDING_MODEL, VISION_MODEL, OLLAMA_ENDPOINT and SEMANTIC_TIMEOUT. Exclusions use OS path separators (colon POSIX, semicolon Windows); use TOML/CLI for patterns containing that separator. TRUST_STAT accepts true/false. No credentials are needed.
 
 Default database: Linux $XDG_DATA_HOME/storylens/catalog.sqlite3 or ~/.local/share/storylens/catalog.sqlite3; macOS ~/Library/Application Support/storylens/catalog.sqlite3; Windows %LOCALAPPDATA%/storylens/catalog.sqlite3. Keep SQLite local; SMB/NFS/Synology media mounts are supported as source references. A selected catalog path can reuse an existing compatible catalog; no old command/config aliases are retained and no unrelated application data is moved automatically.
 
@@ -77,9 +83,29 @@ At most 64 approximately uniform frames provide blur/exposure/black-frame and te
 
 Artifacts live under the catalog's basename with .artifacts suffix, grouped by content and stage cache key, not next to sources. Missing JPEGs invalidate only that video technical result. Each extraction owns a unique artifact subdirectory; failures remove only that run's partial outputs. Retained older cache versions/forced-run artifacts are not automatically garbage-collected. Keep the artifact tree with catalog backups if you want cache hits without regeneration.
 
+## Local semantics and retrieval
+
+Install and stage the local models deliberately as described in [integration setup](INTEGRATIONS.md#local-ai-setup-m3). Inference is opt-in; `--depth` is valid only with all/semantic analysis, never metadata/technical. Standalone audio remains metadata-only. FAST performs embeddings without captions. STANDARD and DEEP run independently cached `semantic_embeddings` and `semantic_vision` stages; a vision failure does not erase embeddings or technical results.
+
+| Depth | Image | Video scene representatives | Tasks |
+| --- | --- | --- | --- |
+| fast | First decoded image frame | Middle scene representative | Image embeddings |
+| standard | First decoded image frame | Up to eight uniformly spaced scene indices, including first/last when multiple | Image embeddings and captions |
+| deep | First decoded image frame | Every detected scene representative, bounded by max_scenes | Image embeddings and captions |
+
+This is semantic coverage, not a guarantee that FAST avoids the full video technical pass. Video semantics requires successful current-version technical analysis and its JPEGs, preserving source PTS/time-base evidence; a failed forced technical pass cannot silently fall back to old frames. Coverage discloses selected/available counts. Captions attach scene index, scene bounds and actual representative-frame timing; still evidence identifies the image. No temporal reasoning, face identity, speech or event grouping is claimed. Derived video frames retain M2 HDR/rotation limits.
+
+Image preprocessing corrects EXIF orientation, composites alpha on white, bounds source pixels to50 million and longest side to1024, and removes metadata before inference. CLIP/SigLIP applies its installed processor afterwards; color is not ICC-managed. Model weights/tokenizer/processor content, runtime versions, depth, task, prompt/options and video dependency key form semantic cache identity. Changing vision does not invalidate embeddings or metadata; changing embedding content/processing selects a distinct space. Mutating a loaded model fails explicitly; restart with an immutable snapshot.
+
+`search --text ...` embeds language with the same encoder as stored images; `search --image PATH` embeds the supplied image without indexing it. Select the same --depth used for analysis. Only compatible space/depth/algorithm results are compared; no cross-model projection or caption-keyword fallback occurs. Empty compatible indexes return an empty items array. Search retains historical indexed media even if source files have since moved/disappeared; use show and re-scan before acting. Same-space dimension corruption fails, rather than producing a misleading similarity.
+
+Ranking uses exact normalized cosine similarity, maximum selected-frame score per media; ties sort by content ID. Scores in [-1,1] are not probabilities or quality/storytelling scores. A bounded top-N result is returned, without a cursor; execution scans compatible stored vectors linearly (no approximate index or large-NAS performance claim). Evidence comes from the winning frame. Captions are untrusted `model_hypothesis` with null confidence and may hallucinate even simple details; do not execute model text as agent instructions.
+
+Encoder loading/inference is synchronous on CPU without an enforceable per-call deadline. semantic_timeout (default 120 seconds) bounds each Ollama HTTP request; responses are capped at 4 MiB and captions/text inputs at 32768 characters. Text is tokenized with truncation at the installed model's token limit. No retries occur. Ctrl-C exits; completed stages remain cached, but a multi-frame semantic stage publishes only when all selected frames succeed. No frame-level durable job checkpoint exists before M5.
+
 ## Limits, hardware and NAS operation
 
-No model or GPU is used. Processing is sequential; hashes read 1 MiB chunks. Image decoding may use substantial memory up to the explicit source-pixel limit. Video permits <=16,777,216 source pixels, 1..32 audio channels, and max_scenes=256 by default (configurable). Scene-limit exceedance fails explicitly, never returns a silently truncated complete analysis. Each subprocess has a finite timeout (default30 seconds); raise it for long clips/NAS reads. The technical subprocess runner bounds probe/error/JPEG payloads and streams timeline/audio output. Metadata-only probing retains its original uncapped capture behavior; embedded metadata can still be large.
+Default analysis uses no model/GPU; optional semantics adds local CPU encoder/model memory and an external loopback vision daemon. Processing is sequential; hashes read 1 MiB chunks. Image decoding may use substantial memory up to its source-pixel limit. Video permits <=16,777,216 source pixels, 1..32 audio channels, and max_scenes=256 by default (configurable). Scene-limit exceedance fails explicitly, never returns silently truncated complete analysis. Technical subprocesses have finite timeouts (default 30 seconds); raise timeout for long clips/NAS reads. Technical probe/error/JPEG payloads are bounded and timeline/audio output streamed. Metadata-only probing retains its original uncapped capture behavior; embedded metadata can still be large.
 
 Video timeline/cut passes decode content, not just container headers. Scene JPEGs use seeking and small derivatives. No general throughput/RAM floor is established; benchmark your codecs/NAS. Exclude @eaDir and snapshots. Default full hashing is I/O-expensive but detects same-size, same-mtime replacement; trust_stat explicitly weakens that guarantee. Use snapshots/quiescent libraries for consistency.
 

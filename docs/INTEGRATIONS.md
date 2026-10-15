@@ -2,15 +2,34 @@
 
 ## What is executable today
 
-M1/M2 provide local metadata indexing and deterministic technical analysis. No AI provider, embedding search, transcription, MCP server, HTTP server, storyboard command or editor adapter is shipped. Calling a model name a configuration profile would not create those capabilities. There are no cloud credentials to configure and no automatic model downloads.
+M1–M3 provide local indexing, technical analysis, opt-in CLIP/SigLIP retrieval and Ollama frame descriptions. Transcription, MCP, an HTTP server, storyboards and editor adapters remain unimplemented. No cloud credentials or automatic model downloads exist. The inference-free profile remains [examples/local.toml](../examples/local.toml).
 
-A fully local foundation profile is [examples/local.toml](../examples/local.toml): run `storylens --config examples/local.toml analyze /mounted/media`. Hybrid and cloud-assisted profiles are architectural plans, not accepted configuration keys today.
+## Local AI setup (M3)
 
-## Local AI setup plan (M3/M4)
+Install `python -m pip install -e ".[semantic]"` in a Python 3.11+ environment. PyTorch CPU is the encoder baseline; select a trusted CPU build for your platform. The optional extra adds Transformers 4.x, safetensors, SentencePiece and protobuf. Model/runtime licenses are separate from StoryLens; do not bundle weights without checking them.
 
-[Primary-source ecosystem research](research/media-ecosystem.md) evaluates Ollama, llama.cpp, MLX, CLIP/SigLIP, faster-whisper, pyannote, OpenCV and PySceneDetect, with capabilities and licenses separated. Install/download models only deliberately, from trusted sources with accepted licenses. Different tasks need different models: text/image encoders for retrieval, a vision-capable model for captions, Whisper for transcription, a separate diarizer for speaker turns. Import existing transcripts before scheduling new inference.
+Stage a complete trusted Transformers **CLIP or SigLIP** directory explicitly: weights, config, processor and tokenizer files. Set `embedding_model` or `--embedding-model` to that directory, not a Hub name. Loading uses `local_files_only=True` and `trust_remote_code=False`, with no acquisition/fallback. A missing/incompatible runtime, incomplete directory or zero/nonfinite feature fails explicitly. CPU float32 and the slow processor are explicit for reproducibility. The provider fingerprints directory content and relevant library/preprocessing versions; moving identical files preserves embedding identity. Use immutable model snapshots. Changes during a run fail rather than storing results under the old identity.
 
-For a future Ollama adapter, upstream now has cloud features: use its documented `OLLAMA_NO_CLOUD=1`/local-only mode, an explicitly local model and loopback binding. A local endpoint alone is not proof of private inference. CPU is the baseline where a selected model supports it; CUDA/Metal/other acceleration is optional and must be verified per runtime/model/platform. No hardware throughput or memory floor is established here.
+For captions, separately install a trusted Ollama release and deliberately install a **local vision-capable model**. Configure the daemon with `OLLAMA_NO_CLOUD=1` and restart it. Bind it to loopback; the StoryLens endpoint must use a numeric loopback origin, e.g. `http://127.0.0.1:11434` (not `localhost`, a LAN host or a proxy). `/api/status` must report `cloud.disabled: true`; older daemons without this evidence are rejected. `/api/tags` must identify a uniquely installed model digest and `/api/show` must advertise vision without remote/cloud routing metadata. No pulls, redirects, proxy environment handling or cloud fallback occur in StoryLens. The daemon/model are trusted local software, not a sandbox; use OS egress controls for a stronger offline boundary.
+
+~~~toml
+[storylens]
+database = "/absolute/local/catalog.sqlite3"
+embedding_model = "/absolute/models/siglip"
+vision_model = "moondream:latest"
+ollama_endpoint = "http://127.0.0.1:11434"
+semantic_timeout = 120.0
+~~~
+
+Pass that file with `--config`; opt in with `analyze PATH --depth fast|standard|deep`. `--stage semantic` defaults to STANDARD and runs only semantic stages plus the video technical dependency when applicable. FAST requires only embeddings; STANDARD/DEEP also require vision. Default `analyze PATH` remains metadata+technical, with no inference. [Depth, retrieval and limits](USAGE.md#local-semantics-and-retrieval).
+
+## Verification and limits
+
+Linux CPU inference was exercised with official `google/siglip-base-patch16-224` revision `7fd15f0689c79d79e38b1c2e2e2370a7bf2761ed` (Apache-2.0), Transformers 4.57.6 and PyTorch 2.14.1+cpu. Image/text features have 768 dimensions and unit norms; a direct encoder smoke denied every socket connection. Ollama 0.40.4 reported cloud disabled, advertised local vision capability and generated real captions with `moondream:latest` digest `55fc3abd386771e5b5d1bbcc732f3c3f4df6e9f9f08f1131f9cc27ba2d1eec5b` (Apache-2.0). Acquisition was a deliberate verification step into temporary directories, never an application behavior. [Pinned sources/setup](research/media-ecosystem.md).
+
+An installed-CLI smoke analyzed three generated color images and a two-scene video, validated summary/export/search JSON against the schema, retrieved relevant color evidence for three text queries, matched a reference image to itself, and retained captions for scene representatives at source times 0.6 and 1.6 seconds. A final STANDARD rerun reused all four files' embeddings/captions and the video technical stage; source hashes stayed unchanged. Changing actual encoder-config content recomputed embeddings only and excluded old-space search rows. These small synthetic checks do not measure family-media relevance or caption truthfulness.
+
+These are correctness checks, not a broad accuracy benchmark or throughput claim. Moondream invented a white border on a plain red fixture; captions remain `model_hypothesis` with null confidence, and must not drive factual identity/event conclusions. The short caption instruction was verified on that model; empty/malformed model output remains an error. CLIP runtime execution, accelerator performance, multilingual retrieval, diverse family-media quality and Windows/macOS inference have not been established here. Transcript import/transcription remain M4.
 
 ## Optional cloud setup plan
 

@@ -29,10 +29,14 @@ class Config:
     scene_threshold: float = 0.3
     minimum_scene_seconds: float = 0.5
     max_scenes: int = 256
+    embedding_model: str = ""
+    vision_model: str = ""
+    ollama_endpoint: str = "http://127.0.0.1:11434"
+    semantic_timeout: float = 120.0
 
 
 def load_config(path: Path | None = None, **overrides) -> Config:
-    values = {"database": default_database()}
+    values = {}
     if path is not None:
         with path.open("rb") as source:
             document = tomllib.load(source)
@@ -54,7 +58,7 @@ def load_config(path: Path | None = None, **overrides) -> Config:
                 value = value.split(os.pathsep) if value else []
             elif name == "max_scenes":
                 value = int(value)
-            elif name in {"timeout", "scene_threshold", "minimum_scene_seconds"}:
+            elif name in {"timeout", "semantic_timeout", "scene_threshold", "minimum_scene_seconds"}:
                 value = float(value)
             values[name] = value
     values.update({key: value for key, value in overrides.items() if value is not None})
@@ -77,9 +81,17 @@ def load_config(path: Path | None = None, **overrides) -> Config:
             raise ValueError(name + " must be a finite positive number")
     if values.get("scene_threshold", 0.3) > 1:
         raise ValueError("scene_threshold must not exceed 1")
+    semantic_timeout = values.get("semantic_timeout", 120.0)
+    if isinstance(semantic_timeout, bool) or not isinstance(semantic_timeout, (int, float)) or not math.isfinite(semantic_timeout) or semantic_timeout <= 0:
+        raise ValueError("semantic_timeout must be a finite positive number")
+    for name in ("embedding_model", "vision_model", "ollama_endpoint"):
+        if not isinstance(values.get(name, ""), str):
+            raise ValueError(name + " must be a string")
     max_scenes = values.get("max_scenes", 256)
     if type(max_scenes) is not int or max_scenes < 1:
         raise ValueError("max_scenes must be a positive integer")
+    if "database" not in values:
+        values["database"] = default_database()
     values["database"] = Path(values["database"]).expanduser().absolute()
     values["exclusions"] = tuple(exclusions)
     return Config(**values)

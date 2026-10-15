@@ -2,9 +2,9 @@
 
 Local-first, editor-independent media intelligence. MIT licensed; free to self-host.
 
-**Current release: 0.2.0 — M1 foundation and M2 technical analysis.** StoryLens indexes referenced media, preserves metadata, measures image quality, finds duplicate candidates, and extracts timestamped video scenes with representative JPEGs and initial frame/audio measurements. No inference, uploads, telemetry, model downloads, subscriptions or accounts.
+**Current package: 0.3.0 — M1 foundation, M2 technical analysis and M3 local semantics.** StoryLens indexes referenced media, preserves metadata, measures image quality, finds duplicate candidates and extracts timestamped video scenes. Opt-in CLIP/SigLIP embeddings enable text/image retrieval; an installed local Ollama vision model describes selected frames. No automatic model downloads, cloud fallback, telemetry, subscriptions or accounts. Default analysis remains inference-free.
 
-Semantic search, transcription, MCP, event grouping, feedback and storyboards remain **planned, not implemented**. See [architecture](ARCHITECTURE.md), [milestones](docs/IMPLEMENTATION_PLAN.md), and primary-source research for [components](docs/research/media-ecosystem.md), [existing applications](docs/research/existing-applications.md), and [FilmCraft/MCP](docs/research/filmcraft-mcp.md).
+Transcription, MCP, event grouping, feedback and storyboards remain **planned, not implemented**. See [architecture](ARCHITECTURE.md), [milestones](docs/IMPLEMENTATION_PLAN.md), and primary-source research for [components](docs/research/media-ecosystem.md), [existing applications](docs/research/existing-applications.md), and [FilmCraft/MCP](docs/research/filmcraft-mcp.md).
 
 ## Installation
 
@@ -48,6 +48,19 @@ Image sharpness/blur, exposure, contrast and noise are derivative-based proxies.
 
 Scene JPEGs live in a catalog-adjacent .artifacts directory. Missing JPEGs cause only the video technical stage to rerun. Results disclose preprocessing, timing, thresholds and limits. HDR previews are 8-bit conversions without tone mapping; do not use their appearance or measurements as HDR fidelity evidence.
 
+## Optional local semantics
+
+Install the optional runtime with `python -m pip install -e ".[semantic]"`; stage a trusted local Transformers CLIP/SigLIP model directory separately. STANDARD/DEEP additionally require an installed Ollama vision model and a daemon configured with `OLLAMA_NO_CLOUD=1`, restarted, whose `/api/status` reports cloud disabled. [Setup and limits](docs/INTEGRATIONS.md#local-ai-setup-m3).
+
+~~~sh
+storylens --embedding-model /models/siglip analyze /mounted/media --depth fast
+storylens --embedding-model /models/siglip --json search --depth fast --text "children playing on a beach"
+storylens --embedding-model /models/siglip --json search --depth fast --image /queries/reference.jpg
+storylens --embedding-model /models/siglip --vision-model moondream:latest analyze /mounted/media --stage semantic --depth standard
+~~~
+
+FAST embeds one representative scene; STANDARD embeds/describes up to eight uniformly selected scenes; DEEP covers every detected scene representative. A still image contributes one frame. Results retain absolute source-time evidence and disclose coverage. Search compares only the selected model/content/preprocessing space and depth; cosine scores are not probabilities or story scores. Captions are untrusted model hypotheses, not established observations.
+
 ## Reference
 
 - [CLI, configuration, media formats, privacy and NAS operation](docs/USAGE.md)
@@ -63,6 +76,6 @@ There is no HTTP API or MCP launch command yet. The importable service is storyl
 python -m unittest discover -s tests -v
 ~~~
 
-51 tests pass on Linux, including real hard cuts, VFR/nonzero-origin timing, display-matrix rotation, audio silence/clipping, cache isolation, missing-artifact recovery, corruption, protocol denial and child-process cancellation. An installed-CLI smoke analyzed five read-only image/video files, found exact/reencoded candidates, produced two scene JPEGs, reused every file's selected stages on rerun, validated JSON outputs and left source hashes unchanged. A wheel builds successfully.
+The deterministic Linux suite covers metadata/technical behavior plus semantic cache isolation, depth/evidence coverage, same-space ranking, model mutation, metadata-free frame transmission and loopback/cloud/HTTP failure boundaries. CPU SigLIP image/text inference was exercised with socket connections denied; see [integration evidence](docs/INTEGRATIONS.md#verification-and-limits) for model revisions and quality limits.
 
-Windows/macOS execution, NAS throughput, full RAW support, HDR fidelity, model quality and FilmCraft runtime interoperability are not yet verified. Platform CI is configured, not evidence of an observed cross-platform run.
+Windows/macOS execution, NAS throughput, full RAW support, HDR fidelity, broad semantic accuracy and FilmCraft runtime interoperability are not yet verified. Platform CI is configured, not evidence of an observed cross-platform run.

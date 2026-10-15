@@ -1,4 +1,4 @@
-"""CLI for local indexing and technical analysis."""
+"""CLI for local indexing, technical analysis and opt-in local semantics."""
 
 import argparse
 import json
@@ -12,7 +12,7 @@ from .service import Analyzer
 
 
 def parser():
-    cli = argparse.ArgumentParser(prog="storylens", description="StoryLens: local metadata and technical media analysis")
+    cli = argparse.ArgumentParser(prog="storylens", description="StoryLens: local media analysis and semantic retrieval")
     cli.add_argument("--version", action="version", version=__version__)
     cli.add_argument("--config", type=Path, help="TOML configuration file")
     cli.add_argument("--database", type=Path, help="Local SQLite catalog path")
@@ -22,6 +22,10 @@ def parser():
     cli.add_argument("--minimum-scene-seconds", type=float, help="Minimum gap between candidate cuts")
     cli.add_argument("--max-scenes", type=int, help="Explicit per-video scene/artifact safety limit")
     cli.add_argument("--timeout", type=float, help="Per-subprocess timeout in seconds")
+    cli.add_argument("--embedding-model", help="Installed local Transformers CLIP/SigLIP model directory")
+    cli.add_argument("--vision-model", help="Installed local Ollama vision model")
+    cli.add_argument("--ollama-endpoint", help="Numeric loopback Ollama URL")
+    cli.add_argument("--semantic-timeout", type=float, help="Ollama HTTP request timeout in seconds")
     cli.add_argument("--exclude", action="append", dest="exclusions", help="Glob against relative path or basename; replaces configured exclusions")
     cli.add_argument("--trust-stat", action=argparse.BooleanOptionalAction, default=None, help="Reuse identity for matching size/mtime (weaker than hashing)")
     cli.add_argument("--json", action="store_true", help="Machine-readable versioned JSON")
@@ -31,7 +35,8 @@ def parser():
         command.add_argument("path", type=Path)
         if name == "analyze":
             command.add_argument("--force", action="store_true", help="Recompute the selected stages even when cached")
-            command.add_argument("--stage", choices=("metadata", "technical", "all"), default="all")
+            command.add_argument("--stage", choices=("metadata", "technical", "semantic", "all"), default="all")
+            command.add_argument("--depth", choices=("fast", "standard", "deep"), help="Opt into semantic stages; semantic-only defaults to standard")
     for name in ("list", "export"):
         command = commands.add_parser(name, help="Page through media identities" if name == "list" else "Export one bounded page including analysis")
         command.add_argument("--limit", type=int, default=50)
@@ -46,6 +51,12 @@ def parser():
         command.add_argument("--limit", type=int, default=50)
         command.add_argument("--after", default="")
     command.add_argument("media_id")
+    search = commands.add_parser("search", help="Same-space text/image cosine retrieval over stored embeddings")
+    query = search.add_mutually_exclusive_group(required=True)
+    query.add_argument("--text", help="Natural-language query")
+    query.add_argument("--image", type=Path, help="Query image (not added to catalog)")
+    search.add_argument("--depth", choices=("fast", "standard", "deep"), default="standard")
+    search.add_argument("--limit", type=int, default=20, help="Top media matches, 1..500")
     return cli
 
 
@@ -56,7 +67,7 @@ def emit(result, machine):
         print(f"Indexed {result['indexed']}/{result['discovered']}; analyzed {result['analyzed']}; cache hits {result['cache_hits']}; failed {result['failed']}")
         for error in result["errors"]:
             print(f"  {error['path']}: {error['error']}")
-    elif "items" in result and ("mode" in result or "media_id" in result):
+    elif "items" in result and ("mode" in result or "media_id" in result or "space" in result):
         print(json.dumps(result, indent=2, ensure_ascii=True, allow_nan=False))
     elif "items" in result:
         for item in result["items"]:
@@ -72,11 +83,15 @@ def main(argv=None):
     try:
         config = load_config(args.config, database=args.database, ffprobe=args.ffprobe, ffmpeg=args.ffmpeg,
                              timeout=args.timeout, exclusions=args.exclusions, trust_stat=args.trust_stat,
-                             scene_threshold=args.scene_threshold, minimum_scene_seconds=args.minimum_scene_seconds, max_scenes=args.max_scenes)
+                             scene_threshold=args.scene_threshold, minimum_scene_seconds=args.minimum_scene_seconds, max_scenes=args.max_scenes,
+                             embedding_model=args.embedding_model, vision_model=args.vision_model,
+                             ollama_endpoint=args.ollama_endpoint, semantic_timeout=args.semantic_timeout)
         with Analyzer(config) as storylens:
             if args.command in ("scan", "analyze"):
                 result = storylens.scan(args.path, analyze=args.command == "analyze", force=getattr(args, "force", False),
-                                        stage=getattr(args, "stage", "all"))
+                                        stage=getattr(args, "stage", "all"), depth=getattr(args, "depth", None))
+            elif args.command == "search":
+                result = storylens.search(text=args.text, image=args.image, depth=args.depth, limit=args.limit)
             elif args.command == "duplicates":
                 result = storylens.duplicates(mode=args.mode, max_distance=args.distance, limit=args.limit, after=args.after)
             elif args.command == "scenes":
@@ -89,7 +104,7 @@ def main(argv=None):
                     result["items"] = [storylens.catalog.get(item["id"]) for item in result["items"]]
         emit(result, args.json or args.command == "export")
         return 2 if result.get("failed") else 0
-    except (OSError, ValueError, TypeError, sqlite3.Error) as error:
+    except (OSError, ValueError, TypeError, RuntimeError, sqlite3.Error) as error:
         if args.json:
             print(json.dumps({"schema_version": "1.0", "error": str(error)}, ensure_ascii=True))
         else:

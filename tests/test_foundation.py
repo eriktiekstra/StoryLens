@@ -53,23 +53,26 @@ class FoundationTests(unittest.TestCase):
     def test_move_and_duplicates_reuse_analysis_after_restart(self):
         original = self.image()
         with Analyzer(self.config) as app:
-            app.scan(self.media, analyze=True, stage="metadata")
+            result = app.scan(self.media, analyze=True, stage="metadata")
+            self.assertEqual(result["failed"], 0, result)
             identity = app.catalog.page()["items"][0]["id"]
         moved = self.media / "moved.jpg"
         original.rename(moved)
         shutil.copyfile(moved, self.media / "copy.jpg")
         with Analyzer(self.config) as app:
             result = app.scan(self.media, analyze=True, stage="metadata")
-            self.assertEqual(result["cache_hits"], 2)
+            self.assertEqual(result["cache_hits"], 2, result)
             self.assertEqual(app.catalog.page()["items"][0]["id"], identity)
             self.assertEqual({p["path"] for p in app.catalog.get(identity)["paths"]},
-                             {str(original), str(moved), str(self.media / "copy.jpg")})
+                             {str(original.resolve()), str(moved.resolve()),
+                              str((self.media / "copy.jpg").resolve())})
 
     def test_full_hash_detects_same_size_mtime_content_replacement(self):
         source = self.image("photo.bmp")
         before = source.stat()
         with Analyzer(self.config) as app:
-            app.scan(self.media, analyze=True, stage="metadata")
+            result = app.scan(self.media, analyze=True, stage="metadata")
+            self.assertEqual(result["failed"], 0, result)
             identity = app.catalog.known_path(source)["media_id"]
             self.image("photo.bmp", "blue")
             self.assertEqual(source.stat().st_size, before.st_size)
@@ -95,10 +98,10 @@ class FoundationTests(unittest.TestCase):
             first = app.scan(self.media, analyze=True, stage="metadata")
             second = app.scan(self.media, analyze=True, stage="metadata")
             failed_id = app.catalog.known_path(corrupt)["media_id"]
-            self.assertEqual(first["failed"], 1)
-            self.assertEqual(first["analyzed"], 1)
-            self.assertEqual(second["failed"], 1)
-            self.assertEqual(second["cache_hits"], 1)
+            self.assertEqual(first["failed"], 1, first)
+            self.assertEqual(first["analyzed"], 1, first)
+            self.assertEqual(second["failed"], 1, second)
+            self.assertEqual(second["cache_hits"], 1, second)
             self.assertEqual(app.catalog.get(failed_id)["analysis"], {})
             self.assertIn("error", app.catalog.get(failed_id)["failures"][0])
 
@@ -129,7 +132,8 @@ class FoundationTests(unittest.TestCase):
 
     def test_configuration_precedence_and_invalid_values(self):
         config = self.base / "config.toml"
-        config.write_text('[storylens]\ntimeout=5\nexclusions=["private"]\n')
+        config.write_text('[storylens]\ndatabase="' + (self.base / "catalog.sqlite3").as_posix() +
+                         '"\ntimeout=5\nexclusions=["private"]\n')
         with patch.dict(os.environ, {"STORYLENS_TIMEOUT": "10"}, clear=True):
             self.assertEqual(load_config(config, timeout=20).timeout, 20)
             self.assertEqual(load_config(config).timeout, 10)
@@ -175,8 +179,8 @@ class FoundationTests(unittest.TestCase):
         (self.media / "broken.jpg").write_bytes(b"broken")
         command = [sys.executable, "-m", "storylens", "--database", str(self.config.database), "--json"]
         result = subprocess.run([*command, "analyze", str(self.media), "--stage", "metadata"], capture_output=True, text=True)
-        self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["failed"], 1)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["failed"], 1, result.stdout)
         exported = subprocess.run([*command, "export", "--limit", "1"], capture_output=True, text=True, check=True)
         page = json.loads(exported.stdout)
         self.assertEqual(page["schema_version"], "1.0")

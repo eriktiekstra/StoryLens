@@ -36,6 +36,7 @@ class PipelineTests(unittest.TestCase):
         original = source.read_bytes()
         with Analyzer(self.config) as app:
             first = app.scan(self.media, analyze=True)
+            self.assertEqual(first["failed"], 0, first)
             media_id = app.catalog.known_path(source)["media_id"]
             stored = app.catalog.get(media_id)["analysis"]
             self.assertEqual(set(stored), {"metadata", "image_technical"})
@@ -58,9 +59,10 @@ class PipelineTests(unittest.TestCase):
             app.scan(self.media)
             self.assertEqual(app.duplicates()["items"], [])
             shutil.copyfile(moved, copy)
-            app.scan(self.media)
+            result = app.scan(self.media)
+            self.assertEqual(result["failed"], 0, result)
             duplicate = app.duplicates()["items"][0]
-            self.assertEqual(set(duplicate["paths"]), {str(moved), str(copy)})
+            self.assertEqual(set(duplicate["paths"]), {str(moved.resolve()), str(copy.resolve())})
             self.assertEqual(duplicate["media_id"], app.catalog.known_path(moved)["media_id"])
 
     def test_near_duplicates_require_computed_image_features(self):
@@ -70,7 +72,8 @@ class PipelineTests(unittest.TestCase):
         with Analyzer(self.config) as app:
             app.scan(self.media)
             self.assertEqual(app.duplicates(mode="near")["items"], [])
-            app.scan(self.media, analyze=True)
+            result = app.scan(self.media, analyze=True)
+            self.assertEqual(result["failed"], 0, result)
             pairs = app.duplicates(mode="near")["items"]
             identities = {row["id"] for row in app.catalog.page()["items"]}
             self.assertEqual({pairs[0]["left_id"], pairs[0]["right_id"]}, identities)
@@ -116,11 +119,13 @@ class PipelineTests(unittest.TestCase):
         source = self.image()
         shutil.copyfile(source, self.media / "copy.png")
         command = [sys.executable, "-m", "storylens", "--database", str(self.config.database), "--json"]
-        result = subprocess.run([*command, "analyze", str(self.media)], text=True, capture_output=True, check=True)
+        result = subprocess.run([*command, "analyze", str(self.media)], text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)["stages"]["image_technical"]["analyzed"], 1)
         duplicates = subprocess.run([*command, "duplicates", "--limit", "1"], text=True, capture_output=True, check=True)
         page = json.loads(duplicates.stdout)
-        self.assertEqual(set(page["items"][0]["paths"]), {str(source), str(self.media / "copy.png")})
+        self.assertEqual(set(page["items"][0]["paths"]),
+                         {str(source.resolve()), str((self.media / "copy.png").resolve())})
         invalid = subprocess.run([*command, "duplicates", "--mode", "near", "--distance", "-1"], text=True, capture_output=True)
         self.assertEqual(invalid.returncode, 1)
         self.assertIn("error", json.loads(invalid.stdout))

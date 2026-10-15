@@ -48,7 +48,8 @@ class Catalog:
         self.connection.close()
 
     def known_path(self, path: Path):
-        return self.connection.execute("SELECT * FROM paths WHERE path=?", (str(path),)).fetchone()
+        canonical = str(Path(path).expanduser().resolve())
+        return self.connection.execute("SELECT * FROM paths WHERE path=?", (canonical,)).fetchone()
 
     def observe(self, media_id, path, media_kind, info):
         with self.connection:
@@ -86,6 +87,13 @@ class Catalog:
             (cache_key,))
         for row in rows:
             yield {"id": row["id"], "result": json.loads(row["result"])}
+
+    def semantic_results(self):
+        rows = self.connection.execute(
+            """SELECT media_id, result FROM stages WHERE stage='semantic_embeddings'
+               ORDER BY analyzed_at DESC, rowid DESC""")
+        for row in rows:
+            yield {"id": row["media_id"], "result": json.loads(row["result"])}
 
     def exact_duplicates(self, limit=50, after=""):
         if not 1 <= limit <= 500:

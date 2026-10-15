@@ -16,6 +16,8 @@ class Analyzer:
         self.artifact_root = config.database.resolve().with_suffix(".artifacts")
         self._image_extractor = None
         self._video_extractor = None
+        self._embeddings = None
+        self._vision = None
 
     def __enter__(self):
         return self
@@ -46,9 +48,16 @@ class Analyzer:
         return all(Path(scene["representative_frame"]["path"]).is_file()
                    for scene in result["scenes"])
 
-    def scan(self, root: Path, *, analyze=False, force=False, stage="all"):
-        if stage not in {"metadata", "technical", "all"}:
-            raise ValueError("stage must be metadata, technical or all")
+    def scan(self, root: Path, *, analyze=False, force=False, stage="all", depth=None):
+        if stage not in {"metadata", "technical", "semantic", "all"}:
+            raise ValueError("stage must be metadata, technical, semantic or all")
+        from .semantics import DEPTHS
+        if depth is not None and depth not in DEPTHS:
+            raise ValueError("depth must be fast, standard or deep")
+        if depth is not None and stage not in {"semantic", "all"}:
+            raise ValueError("depth applies only to semantic or all stages")
+        if stage == "semantic" and depth is None:
+            depth = "standard"
         root = root.expanduser().resolve(strict=True)
         summary = {"schema_version": "1.0", "root": str(root), "discovered": 0,
                    "indexed": 0, "analyzed": 0, "cache_hits": 0, "failed": 0,
@@ -87,14 +96,32 @@ class Analyzer:
             selected = []
             if stage in {"metadata", "all"}:
                 selected.append(("metadata", self.extractor))
-            if stage in {"technical", "all"}:
+            if stage in {"technical", "all"} or (stage == "semantic" and kind(entry) == "video"):
                 technical = self._technical(kind(entry))
                 if technical is not None:
                     selected.append(technical)
+            if depth is not None and kind(entry) in {"image", "video"}:
+                selected.append(("semantic_embeddings", None))
+                if depth != "fast":
+                    selected.append(("semantic_vision", None))
             file_failed, computed, hits = False, False, 0
+            failed_stages = set()
             for stage_name, extractor in selected:
                 counts = summary["stages"].setdefault(stage_name, {"analyzed": 0, "cache_hits": 0, "failed": 0})
                 try:
+                    if stage_name.startswith("semantic_"):
+                        from .semantics import SemanticExtractor
+                        video, video_key = None, None
+                        if kind(entry) == "video":
+                            if "video_technical" in failed_stages:
+                                raise ValueError("Current video technical stage failed; stale frames cannot support semantics")
+                            _, technical = self._technical("video")
+                            video_key = technical.cache_key()
+                            video = self.catalog.stage_result(media_id, "video_technical", video_key)
+                            if video is None or not self._artifacts_available("video_technical", video):
+                                raise ValueError("Video semantics requires successful current video technical analysis")
+                        task = stage_name.removeprefix("semantic_")
+                        extractor = SemanticExtractor(self._semantic_provider(task), depth, task, video, video_key)
                     if signature(snapshot(entry)) != signature(before):
                         raise ValueError("Source changed before stage execution")
                     key = extractor.cache_key(kind(entry)) if stage_name == "metadata" else extractor.cache_key()
@@ -109,9 +136,14 @@ class Analyzer:
                         result = extractor.extract(entry, self.artifact_root / media_id[7:] / key)
                     else:
                         result = extractor.extract(entry)
+                    if stage_name.startswith("semantic_"):
+                        from .semantics import digest
+                        if digest(result["provenance"]) != key:
+                            raise RuntimeError("Semantic cache identity changed during extraction")
                     if signature(snapshot(entry)) != signature(before):
                         raise ValueError("Source changed during " + stage_name)
                 except (OSError, ValueError, TypeError, SyntaxError, EOFError, RuntimeError, Warning) as error:
+                    failed_stages.add(stage_name)
                     self.catalog.fail(media_id, stage_name, str(error)[:2000])
                     counts["failed"] += 1
                     file_failed = True
@@ -125,6 +157,32 @@ class Analyzer:
             summary["analyzed"] += int(computed)
             summary["cache_hits"] += int(bool(selected) and hits == len(selected))
         return summary
+
+    def _semantic_provider(self, task):
+        from .providers import LocalEmbeddings, OllamaVision
+        if task == "embeddings":
+            if self._embeddings is None:
+                self._embeddings = LocalEmbeddings(self.config.embedding_model)
+            return self._embeddings
+        if self._vision is None:
+            self._vision = OllamaVision(self.config.ollama_endpoint, self.config.vision_model, self.config.semantic_timeout)
+        return self._vision
+
+    def search(self, *, text=None, image=None, depth="standard", limit=20):
+        from .semantics import DEPTHS, digest, search_results
+        if (text is None) == (image is None):
+            raise ValueError("Provide exactly one text or image query")
+        if depth not in DEPTHS or type(limit) is not int or not 1 <= limit <= 500:
+            raise ValueError("Invalid search depth or limit (1..500)")
+        provider = self._semantic_provider("embeddings")
+        identity = provider.identity()
+        query = provider.text(text) if text is not None else provider.image(Path(image))
+        if identity != provider.identity():
+            raise RuntimeError("Embedding provider changed during query")
+        space = digest(identity)
+        items = search_results(self.catalog.semantic_results(), query, space=space, depth=depth, limit=limit)
+        return {"schema_version": "1.0", "space": space, "depth": depth, "metric": "cosine",
+                "items": items, "limit": limit, "ranking": "maximum selected-frame similarity per media; ties by media ID"}
 
     def duplicates(self, *, mode="exact", max_distance=6, limit=50, after=""):
         if mode == "exact":
