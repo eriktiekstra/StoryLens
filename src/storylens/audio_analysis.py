@@ -65,7 +65,7 @@ class AudioTechnicalExtractor:
             raise ValueError("Audio source must be a regular file")
         raw, errors = self._runner._run(self.ffprobe, [
             "-v", "error", "-protocol_whitelist", "file,pipe", "-show_streams",
-            "-show_entries", "stream=index,codec_type,channels,sample_rate,time_base,start_time",
+            "-show_entries", "stream=index,codec_type,channels,sample_rate,time_base",
             "-of", "json", str(path)])
         if errors.strip():
             raise ValueError("Audio probe failed: " + errors[-2000:])
@@ -79,23 +79,17 @@ class AudioTechnicalExtractor:
             channels, rate = int(stream["channels"]), int(stream["sample_rate"])
             base = Fraction(stream["time_base"])
             index = int(stream["index"])
-            start_time = stream.get("start_time", "0")
-            try:
-                start = Fraction(start_time)
-            except ValueError:
-                start = Fraction(0)
         except (KeyError, ValueError, TypeError, ZeroDivisionError) as error:
             raise ValueError("Audio has invalid stream parameters") from error
         if not 1 <= channels <= MAX_CHANNELS or not 1 <= rate <= MAX_SAMPLE_RATE or base <= 0 or index < 0:
             raise ValueError("Audio exceeds supported channel/sample-rate/time-base resource limits")
-        return path, {"index": index, "channels": channels, "sample_rate": rate,
-                      "time_base": base, "start_time": start}
+        return path, {"index": index, "channels": channels, "sample_rate": rate, "time_base": base}
 
     def _timeline(self, path, stream):
         origin = None
         samples = frames = payload = 0
         pending = bytearray()
-        rate, base, start = stream["sample_rate"], stream["time_base"], stream["start_time"]
+        rate, base = stream["sample_rate"], stream["time_base"]
         limit = Fraction(str(self.max_audio_seconds))
 
         def frame(line):

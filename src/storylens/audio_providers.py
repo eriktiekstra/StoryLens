@@ -11,7 +11,7 @@ import subprocess
 import sys
 import threading
 
-ALGORITHM_VERSION = "audio-models-1"
+ALGORITHM_VERSION = "audio-models-2"
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_ERROR_BYTES = 256 * 1024
 MAX_SEGMENTS = 10_000
@@ -34,9 +34,8 @@ OFFLINE_ENV = {
 def _libraries(task):
     """Report versions of optional dependencies; missing packages become None.
 
-    Provenance should survive in environments that only validate result shapes.
-    Actual extraction fails later when the worker tries to import a missing model
-    library.
+    Provenance remains available without optional packages. Extraction explicitly
+    checks these identities before decoding or starting the isolated worker.
     """
     result = {}
     for name in LIBRARIES[task]:
@@ -137,7 +136,8 @@ class AudioModelExtractor:
             "language": self.language, "tool_versions": versions,
             "preprocessing": {"channels": 1, "sample_rate_hz": 16000, "format": "PCM signed 16-bit",
                               "max_audio_seconds": self.max_audio_seconds},
-            "settings": {"word_timestamps": True, "vad": "bundled Silero, default VadOptions"}
+            "settings": {"word_timestamps": True, "vad": "bundled Silero, default VadOptions",
+                         "vad_filters_transcription": False}
             if self.task == "transcription" else
             {"speaker_labels": "anonymous run-local clusters", "preserve_overlap": True}
             if self.task == "diarization" else
@@ -240,7 +240,7 @@ class AudioModelExtractor:
                 raise ValueError("Audio model segments exceed bounded payload limit")
             return items
 
-        result = {"schema_version": 1, "provenance": provenance, "source_timing": timing}
+        result = {"schema_version": "1.0", "provenance": provenance, "source_timing": timing}
         try:
             if self.task == "transcription":
                 segments = []
@@ -273,16 +273,27 @@ class AudioModelExtractor:
                               overlap_policy="independent turns; overlaps preserved; no transcript assignment")
             else:
                 windows = []
+                previous_end = origin
                 for window in entries("windows"):
                     scores = window["scores"]
                     if not isinstance(scores, list) or not 0 < len(scores) <= SOUND_TOP_K:
                         raise ValueError("Invalid sound model top-k scores")
-                    windows.append(dict(interval(window), index=len(windows),
+                    bounds = interval(window)
+                    if abs(bounds["start_seconds"] - previous_end) > 1 / 16000:
+                        raise ValueError("Sound model windows do not cover the source contiguously")
+                    if any(s.get("score") is None for s in scores):
+                        raise ValueError("Sound model must return actual numeric scores")
+                    previous_end = bounds["end_seconds"]
+                    windows.append(dict(bounds, index=len(windows),
                                         scores=[{"label": text(s["label"]), "score": _probability(s["score"])}
                                                 for s in scores]))
+                if not windows or abs(previous_end - timing["end_seconds"]) > 1 / 16000:
+                    raise ValueError("Sound model did not cover the complete decoded source")
+                if raw["score_activation"] not in ("softmax", "sigmoid"):
+                    raise ValueError("Invalid sound model score activation")
                 result.update(windows=windows, coverage={"start_seconds": origin,
                               "end_seconds": timing["end_seconds"], "duration_seconds": duration,
-                              "method": "contiguous non-overlapping input windows; model preprocessing may pad or truncate"},
+                              "method": "contiguous input windows; model preprocessing may pad/truncate; final short input padded to 0.1 s"},
                               score_interpretation="Uncalibrated model scores, not verified event probabilities",
                               score_activation=text(raw["score_activation"]))
         except (KeyError, TypeError, AttributeError) as error:
@@ -292,6 +303,9 @@ class AudioModelExtractor:
     def extract(self, path: Path):
         from .audio_analysis import decoded_audio
         before = self.provenance()
+        missing = [name for name, identity in before["libraries"].items() if identity is None]
+        if missing:
+            raise ValueError("Missing optional local audio dependencies: " + ", ".join(missing))
         with decoded_audio(Path(path), ffmpeg=self.ffmpeg, ffprobe=self.ffprobe, timeout=self.timeout,
                            max_audio_seconds=self.max_audio_seconds) as (wav_path, timing):
             result = self._result(self._run_worker(wav_path), timing, before)
