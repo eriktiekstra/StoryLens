@@ -17,4 +17,24 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: python -m pip install -e .
+      - name: Diagnose Windows file metadata
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import os, tempfile
+          from pathlib import Path
+          from PIL import Image
+          from storylens.ingest import signature
+          with tempfile.TemporaryDirectory() as directory:
+              path = Path(directory) / "photo.jpg"
+              Image.new("RGB", (32, 24), "red").save(path)
+              before = path.stat(follow_symlinks=False)
+              with path.open("rb") as source:
+                  opened = os.fstat(source.fileno())
+                  print("path signature:", signature(before), flush=True)
+                  print("open signature:", signature(opened), flush=True)
+                  print("path stat:", before, flush=True)
+                  print("open stat:", opened, flush=True)
+                  print("path birthtime:", getattr(before, "st_birthtime_ns", None), flush=True)
+                  print("open birthtime:", getattr(opened, "st_birthtime_ns", None), flush=True)
       - run: python -m unittest discover -s tests -v
