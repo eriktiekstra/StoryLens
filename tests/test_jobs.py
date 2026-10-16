@@ -255,8 +255,9 @@ print(json.dumps(manager.start(Path(sys.argv[2]))),flush=True)
                 "OPENAI_API_KEY": "secret", "HF_TOKEN": "secret",
                 "AWS_SECRET_ACCESS_KEY": "secret", "OTEL_EXPORTER_OTLP_ENDPOINT": "http://exporter",
                 "STORYLENS_DATABASE": "/wrong/catalog"}, clear=True):
-            self.assertEqual(_worker_environment(), {"PATH": "/tools", "PYTHONPATH": "/source",
-                "SystemRoot": "C:\\Windows", "LC_ALL": "C.UTF-8"})
+            actual = {key.upper(): value for key, value in _worker_environment().items()}
+            self.assertEqual(actual, {"PATH": "/tools", "PYTHONPATH": "/source",
+                "SYSTEMROOT": r"C:\Windows", "LC_ALL": "C.UTF-8"})
 
     def test_queued_worker_executes_after_previous_job_finishes(self):
         self.images(50, (768, 512))

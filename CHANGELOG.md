@@ -8,7 +8,7 @@
 - Packaged the core JSON Schema in the wheel and exposed core/job/transport schema resources. Corrected audio-transcription schema_version to match the actual string "1.0" result.
 - Added Codex/Claude configuration examples and operational/privacy limits. The 159-test Linux suite passes; actual SDK subprocess/CLI parity, restart/cancellation/fencing, unauthorized paths and core/MCP installed-wheel behavior were exercised.
 
-
+- Windows durable workers launch through the local WMI process provider rather than inheriting the MCP host kill-on-close Job Object; shutdown survival remains covered by the real SDK reconnect test.
 - Fixed audio-worker timeout, cancellation and output-limit cleanup on Windows; POSIX retains process-group termination.
 - Install and verify FFmpeg/ffprobe on every GitHub Actions OS so the full media suite runs on Linux, macOS and Windows rather than relying on preinstalled tools. Video fixtures canonicalize temporary paths and explicitly encode HDR bitstream transfer tags for newer FFmpeg builds.
 

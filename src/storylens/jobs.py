@@ -64,6 +64,44 @@ def _worker_environment():
             if key.upper() in names or key.upper().startswith("LC_")}
 
 
+def _launch_windows(command, environment, directory):
+    """Ask local WMI to launch outside the MCP host's kill-on-close Job Object.
+
+    DETACHED_PROCESS alone still inherits a Windows Job Object. WMI owns/reaps
+    the independent worker; no transport handles or caller credentials are sent.
+    The fixed PowerShell program receives only JSON data on stdin, never code.
+    """
+    powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$request = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
+    # CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
+    CreateFlags = [uint32]16777736
+    ShowWindow = [uint16]0
+    EnvironmentVariables = [string[]]$request.environment
+}
+$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+    CommandLine = [string]$request.command_line
+    CurrentDirectory = [string]$request.directory
+    ProcessStartupInformation = $startup
+}
+if ($result.ReturnValue -ne 0) { throw "WMI process creation failed: $($result.ReturnValue)" }
+$result.ProcessId | ConvertTo-Json -Compress
+"""
+    request = json.dumps({"command_line": subprocess.list2cmdline(command),
+                          "directory": str(directory),
+                          "environment": [f"{key}={value}" for key, value in environment.items()]})
+    try:
+        result = subprocess.run([str(powershell), "-NoProfile", "-NonInteractive", "-Command", script],
+            input=request, text=True, capture_output=True, env=environment,
+            creationflags=subprocess.CREATE_NO_WINDOW, timeout=20)
+        if result.returncode or not isinstance(json.loads(result.stdout), int):
+            raise ValueError(result.stderr[-2000:] or "Missing WMI process ID")
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        raise OSError("Cannot launch independent Windows worker through local PowerShell/WMI: " + str(error)[:2000]) from error
+
+
 def _config_document(config):
     return {field.name: str(value) if isinstance(value, Path) else value
             for field in fields(config) for value in [getattr(config, field.name)]}
@@ -175,24 +213,24 @@ class JobManager:
         return self.status(job_id)
 
     def _launch(self, job_id, attempt):
-        options = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
-                   "stderr": subprocess.DEVNULL, "close_fds": True,
-                   "env": _worker_environment()}
-        if os.name == "nt":
-            options["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        else:
-            options["start_new_session"] = True
+        command = [sys.executable, "-m", "storylens.job_worker",
+                   str(self.store.path), job_id, str(attempt)]
+        environment = _worker_environment()
         try:
-            process = subprocess.Popen([sys.executable, "-m", "storylens.job_worker",
-                str(self.store.path), job_id, str(attempt)], **options)
+            if os.name == "nt":
+                _launch_windows(command, environment, self.store.path.parent)
+            else:
+                process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
+                    env=environment, start_new_session=True)
+                # Reap without waiting for work or retaining transport pipes.
+                threading.Thread(target=process.wait, daemon=True).start()
         except OSError as error:
             with self.store.connect() as connection:
                 connection.execute("""UPDATE jobs SET status='failed',error=?,finished_at=?,updated_at=?
                     WHERE id=? AND attempt=? AND status='queued'""",
                     (str(error)[:4000], _now(), _now(), job_id, attempt))
             raise
-        # Reap our child without waiting for its work or retaining inherited pipes.
-        threading.Thread(target=process.wait, daemon=True).start()
 
     def status(self, job_id):
         with self.store.connect() as connection:
