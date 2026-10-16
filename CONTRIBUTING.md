@@ -16,7 +16,7 @@ A stage change must update its own algorithm revision and relevant parameter/mod
 
 Describe the behavior, privacy/data flow, cache impact, dependency/model licenses and actual verification. Add deterministic tests for consumer-visible boundaries and failures. Mock cloud HTTP when providers exist; never require paid access. Use an actual CLI/media smoke in addition to tests, and record limits instead of claiming untested OS/GPU/codec support. Do not check in personal family media for reproduction.
 
-The suite covers identity/cache/error/technical/semantic/audio behavior and real official-SDK stdio calls, detached submitter exit, queue continuation, cancellation, expired-lease recovery, stale-owner write fencing and authorized catalog filtering. GitHub Actions installs FFmpeg and the MCP extra on Linux/macOS/Windows for Python3.11/3.12. Base installs remain usable without MCP; MCP tests skip explicitly if that optional extra is absent. Real disk exhaustion, multi-host NAS scheduling, universal GPU performance and cloud/editor adapters remain unverified.
+The suite covers identity/cache/error/technical/semantic/audio behavior, real official-SDK stdio calls, detached submitter exit, queue continuation, cancellation, expired-lease recovery, stale-owner write fencing, authorized catalog filtering and M6 event/feedback boundaries. GitHub Actions installs FFmpeg and the MCP extra on Linux/macOS/Windows for Python3.11/3.12. Base installs remain usable without MCP; MCP tests skip explicitly if that optional extra is absent. Real disk exhaustion, multi-host NAS scheduling, universal GPU performance, broad family-media event accuracy and cloud/editor adapters remain unverified.
 
 ## Licensing
 

@@ -2,7 +2,7 @@
 
 ## What is executable today
 
-M1–M5 provide local indexing, technical/audio analysis, timestamped transcript import/export, opt-in CLIP/SigLIP retrieval/Ollama frame descriptions, local transcription, durable jobs and optional MCP stdio. HTTP, events/feedback, storyboards and editor adapters remain unimplemented. No cloud credentials or automatic model downloads exist. The inference-free profile remains [examples/local.toml](../examples/local.toml).
+M1–M6 provide local indexing, technical/audio analysis, timestamped transcript import/export, opt-in CLIP/SigLIP retrieval/Ollama frame descriptions, local transcription, durable jobs, optional MCP stdio, coarse event grouping from stored evidence, durable manual events and independent user corrections/preferences. Storyboards and editor adapters remain unimplemented. No cloud credentials or automatic model downloads exist. The inference-free profile remains [examples/local.toml](../examples/local.toml).
 
 ## Local AI setup (M3)
 
@@ -61,7 +61,7 @@ Claude Code project `.mcp.json`:
 
 Windows uses the trusted venv Scripts/storylens.exe executable and absolute Windows paths (escape backslashes in JSON). Add repeated `--allow-root` arguments for additional directories. Never point a host at an auto-downloading `pip`/model acquisition command or give it an unrestricted home-directory root. Restrict inherited environment and review disclosure of private content; StoryLens cannot prevent the agent host forwarding returned data elsewhere.
 
-Fourteen tools provide authorized queries, supplied transcript import/paged export and durable start/status/cancel/resume/result/list. Server disconnect leaves jobs running; cancel_job records a separate cancellation request. Scenes/transcript content use dedicated pages; show/export disclose omissions and arbitrary metadata is bounded. [API/schema contracts](API.md#mcp-stdio-envelopes-m5) document cursors and limits.
+Twenty-three tools provide authorized queries, supplied transcript import/paged export, durable start/status/cancel/resume/result/list, event grouping (`list_events`, `show_event`), manual event management (`create_event`, `rename_event`) and independent corrections/preferences (`get_feedback`, `set_feedback`, `reset_feedback`, `get_preferences`, `set_preferences`). Server disconnect leaves jobs running; cancel_job records a separate cancellation request. Scenes/transcript content use dedicated pages; show/export disclose omissions and arbitrary metadata is bounded. Event/feedback tools filter unapproved media before grouping and fail closed if a manual relationship spans approved and unapproved sources. [API/schema contracts](API.md#mcp-stdio-envelopes-m5) document cursors and limits.
 
 Verification used the official 2.3.0 ClientSession/stdio_client against actual subprocesses, including handshake, jobs across reconnect, schema resources, CLI parity and unauthorized/malformed input. The same smoke passed from the installed wheel outside source-package imports. Codex/Claude configuration follows their official docs, but those host applications were not launched here; [primary sources](research/filmcraft-mcp.md#m5-implementation-evidence-addendum--2026-10-16).
 
@@ -77,10 +77,11 @@ Actual tools include `media_import` with absolute `paths`, `command_list`, `comm
 
 1. Agent starts StoryLens analysis job, monitors bounded progress/result pages.
 2. Core produces grounded scenes, transcripts, events and highlight candidates.
-3. Agent requests an editor-independent storyboard with source IDs/times and selection rationale.
-4. User reviews exclusions, required media, event assignments and proposed cuts.
-5. Agent discovers actual FilmCraft tools/engine commands and creates/opens the approved project.
-6. Agent resolves available local source paths, imports selected assets, assembles cuts and audio using discovered commands.
-7. Agent inspects/renders previews, requests review, then exports through verified commands.
+3. Agent reviews events/feedback, refines assignments and grouping preferences with the user.
+4. Agent requests an editor-independent storyboard with source IDs/times and selection rationale.
+5. User reviews exclusions, required media, event assignments and proposed cuts.
+6. Agent discovers actual FilmCraft tools/engine commands and creates/opens the approved project.
+7. Agent resolves available local source paths, imports selected assets, assembles cuts and audio using discovered commands.
+8. Agent inspects/renders previews, requests review, then exports through verified commands.
 
 This is a proposed workflow, not an implemented end-to-end demonstration. Runtime tool discovery, rational time conversion, imported IDs, save/reopen and a consented rendered fixture are M8 acceptance gates. The core never depends on FilmCraft; another editor can consume the same approved storyboard.

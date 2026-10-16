@@ -15,10 +15,11 @@ from typing import Annotated, Literal
 import anyio
 from mcp.server import MCPServer
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
-from pydantic import Field, StrictBool, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
 from . import __version__
 from .access import PathPolicy
+from .events import DEFAULT_SETTINGS
 from .jobs import JobManager
 from .service import Analyzer
 from .transcripts import serialize
@@ -30,7 +31,44 @@ TranscriptFormat = Literal["json", "srt", "vtt"]
 MAX_TEXT = 16384
 MAX_RESPONSE = 131072
 
-# Job state is application-owned, not the SDK's experimental/protocol Tasks API.
+FeedbackField = Literal["selection", "capture_time", "gps", "event_id", "segments"]
+FiniteNumber = Annotated[float, Field(strict=True, allow_inf_nan=False)]
+
+
+class Coordinates(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    latitude: Annotated[FiniteNumber, Field(ge=-90, le=90)]
+    longitude: Annotated[FiniteNumber, Field(ge=-180, le=180)]
+
+
+class ManualSegment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    start_seconds: FiniteNumber
+    end_seconds: FiniteNumber
+    selection: Literal["include", "exclude"]
+    label: Annotated[StrictStr, Field(max_length=256)] = ""
+
+
+class FeedbackPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selection: Literal["neutral", "include", "exclude"] = "neutral"
+    capture_time: Annotated[StrictStr, Field(max_length=64)] | None = None
+    gps: Coordinates | None = None
+    event_id: StrictStr | None = None
+    segments: Annotated[list[ManualSegment], Field(max_length=100)] = Field(default_factory=list)
+
+
+class PreferencesPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    gap_seconds: FiniteNumber = DEFAULT_SETTINGS["gap_seconds"]
+    distance_km: FiniteNumber = DEFAULT_SETTINGS["distance_km"]
+    semantic_gap_seconds: FiniteNumber = DEFAULT_SETTINGS["semantic_gap_seconds"]
+    semantic_similarity: FiniteNumber = DEFAULT_SETTINGS["semantic_similarity"]
+    max_event_seconds: FiniteNumber = DEFAULT_SETTINGS["max_event_seconds"]
+    semantic_depth: Depth = DEFAULT_SETTINGS["semantic_depth"]
+
+
+# Job state is application-owned, not the SDK experimental/protocol Tasks API.
 JOB_SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "StoryLens durable job v1",
@@ -119,6 +157,56 @@ class _ScopedCatalog:
             cursor = page["next_cursor"]
         return {"items": items[:limit],
                 "next_cursor": items[limit - 1]["media_id"] if len(items) > limit else None}
+
+
+class _ScopedFeedback:
+    """Curated event relationships may not disclose or modify unapproved sources."""
+
+    def __init__(self, store, catalog):
+        self.store, self.catalog = store, catalog
+
+    def __getattr__(self, name):
+        return getattr(self.store, name)
+
+    def _check_event(self, event_id):
+        if event_id is not None and not all(self.catalog._allowed(media_id)
+                                           for media_id in self.store.members(event_id)):
+            raise PermissionError("Manual event includes sources outside approved roots")
+
+    def get(self, media_id):
+        result = self.store.get(media_id)
+        self._check_event(result["values"].get("event_id"))
+        return result
+
+    def update(self, media_id, patch, media):
+        current = self.store.get(media_id)["values"]
+        self._check_event(patch.get("event_id", current.get("event_id")))
+        return self.store.update(media_id, patch, media)
+
+    def reset(self, media_id, fields=None):
+        if fields is not None and "event_id" not in fields:
+            self._check_event(self.store.get(media_id)["values"].get("event_id"))
+        return self.store.reset(media_id, fields)
+
+    def rename_event(self, event_id, title):
+        self._check_event(event_id)
+        return self.store.rename_event(event_id, title)
+
+    def snapshot(self):
+        state = self.store.snapshot()
+        visible = {media_id for media_id in state["media"] if self.catalog._allowed(media_id)}
+        assigned = {}
+        for media_id, values in state["media"].items():
+            if values.get("event_id") is not None:
+                assigned.setdefault(values["event_id"], set()).add(media_id)
+        for media_id in visible:
+            event_id = state["media"][media_id].get("event_id")
+            if event_id is not None and not assigned[event_id].issubset(visible):
+                raise PermissionError("Manual event includes sources outside approved roots")
+        return {"media": {media_id: values for media_id, values in state["media"].items() if media_id in visible},
+                "events": [event for event in state["events"] if assigned.get(event["id"])
+                           and assigned[event["id"]].issubset(visible)],
+                "preferences": state["preferences"]}
 
 
 def _bounded(value, policy):
@@ -237,15 +325,17 @@ def create_server(config, roots):
                 if isinstance(error, (PermissionError, FileNotFoundError)):
                     message = "Source unavailable or outside approved roots"
                 elif isinstance(error, KeyError):
-                    message = "Unknown job ID"
+                    message = "Unknown resource ID"
                 else:
                     message = str(error)[:2000]
                 return CallToolResult(content=[TextContent(type="text", text=message)], is_error=True)
         return await anyio.to_thread.run_sync(run)
 
-    def analyze(operation):
+    def analyze(operation, *, user_state=False):
         with Analyzer(config) as app:
             app.catalog = _ScopedCatalog(app.catalog, policy)
+            if user_state:
+                app._feedback = _ScopedFeedback(app._user_state(), app.catalog)
             return operation(app)
 
     @tool(annotations=readonly)
@@ -359,6 +449,56 @@ def create_server(config, roots):
     async def list_jobs(limit: PageSize = 50, after: StrictStr = "") -> CallToolResult:
         """Page durable jobs authorized by this server's startup roots."""
         return await invoke(lambda: jobs.list(limit=limit, after=after))
+
+    @tool(annotations=readonly)
+    async def list_events(limit: PageSize = 50, after: StrictStr = "") -> CallToolResult:
+        """Page coarse event candidates, with explicit timezone/provenance and no inference."""
+        return await invoke(lambda: analyze(lambda app: app.events(limit=limit, after=after), user_state=True))
+
+    @tool(annotations=readonly)
+    async def show_event(event_id: StrictStr, limit: PageSize = 50, after: StrictStr = "") -> CallToolResult:
+        """Page event member evidence; cursors reject changed grouping or corrections."""
+        return await invoke(lambda: analyze(lambda app: app.event(event_id, limit=limit, after=after), user_state=True))
+
+    @tool(annotations=write_local)
+    async def create_event(title: Annotated[StrictStr, Field(min_length=1, max_length=256)]) -> CallToolResult:
+        """Create a stable user-owned event; assign approved media using set_feedback."""
+        return await invoke(lambda: analyze(lambda app: app.create_event(title), user_state=True))
+
+    @tool(annotations=write_local)
+    async def rename_event(event_id: StrictStr, title: Annotated[StrictStr, Field(min_length=1, max_length=256)]) -> CallToolResult:
+        """Rename a manual event only when all its assigned sources are approved."""
+        return await invoke(lambda: analyze(lambda app: app.rename_event(event_id, title), user_state=True))
+
+    @tool(annotations=readonly)
+    async def get_feedback(media_id: StrictStr) -> CallToolResult:
+        """Read user-owned corrections independently of generated analysis."""
+        return await invoke(lambda: analyze(lambda app: app.feedback(media_id), user_state=True))
+
+    @tool(annotations=write_local)
+    async def set_feedback(media_id: StrictStr, patch: FeedbackPatch) -> CallToolResult:
+        """Atomically patch selection, capture/GPS, event assignment or source-time segments."""
+        return await invoke(lambda: analyze(lambda app: app.set_feedback(media_id, patch.model_dump(exclude_unset=True)), user_state=True))
+
+    @tool(annotations=write_local)
+    async def reset_feedback(media_id: StrictStr, fields: Annotated[list[FeedbackField], Field(max_length=6)] | None = None) -> CallToolResult:
+        """Remove selected overrides (or all); null capture/GPS values instead mark unknown."""
+        return await invoke(lambda: analyze(lambda app: app.reset_feedback(media_id, fields), user_state=True))
+
+    @tool(annotations=readonly)
+    async def get_preferences() -> CallToolResult:
+        """Read collection-level grouping preferences, never provider or path configuration."""
+        return await invoke(lambda: analyze(lambda app: app.preferences(), user_state=True))
+
+    @tool(annotations=write_local)
+    async def set_preferences(patch: PreferencesPatch) -> CallToolResult:
+        """Persist grouping thresholds independently of AI data; no model/network requests."""
+        return await invoke(lambda: analyze(lambda app: app.set_preferences(patch.model_dump(exclude_unset=True)), user_state=True))
+
+    @server.resource("storylens://schemas/curation-v1", mime_type="application/schema+json")
+    def curation_schema() -> str:
+        """Versioned event candidates, manual corrections and grouping preferences."""
+        return files("storylens").joinpath("schemas/curation-v1.schema.json").read_text(encoding="utf-8")
 
     @server.resource("storylens://schemas/results-v1", mime_type="application/schema+json")
     def results_schema() -> str:

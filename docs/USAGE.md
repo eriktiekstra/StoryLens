@@ -15,6 +15,12 @@ Global options precede the command: storylens [OPTIONS] COMMAND ... .
 | scenes MEDIA_ID [--limit N] [--after CURSOR] | Timestamped scenes and representative JPEG references from stored video analysis |
 | search (--text QUERY / --image PATH) [--depth fast/standard/deep] [--limit N] | Top same-space cosine matches from stored embeddings; default depth standard, limit20 (max500); no pagination |
 | transcript --media-id ID [--format json/srt/vtt] [--offset SECONDS] [--language CODE] PATH | Import supplied timestamped text without model inference |
+| events [--limit N] [--after CURSOR] | Page coarse event candidates from stored evidence and corrections |
+| event EVENT_ID [--limit N] [--after CURSOR] | Page member evidence for one automatic/manual/undated event |
+| event-create TITLE | Register a stable manual event ID for explicit member assignment |
+| event-rename EVENT_ID TITLE | Rename a registered manual event |
+| feedback MEDIA_ID [--set JSON | --clear FIELD... | --clear-all] | Read or patch independent corrections |
+| preferences [--set JSON] | Read or patch grouping thresholds |
 | job --allow-root DIR start/status/cancel/resume/result/list ... | Durable local work and checkpoint-based progress; JSON output |
 | serve --allow-root DIR | Optional official-SDK MCP stdio server; repeat roots explicitly |
 
@@ -136,6 +142,16 @@ storylens --database /local/catalog.sqlite3 job --allow-root /mounted/media list
 
 States distinguish queued/running/cancel_requested/succeeded/failed/cancelled/interrupted. Cancellation is cooperative at entry/stage boundaries, not an immediate process kill; a current hash or model/decoder stage may finish before cancellation is acknowledged. Committed stages remain reusable. Explicit resume uses current cache keys and does not repeat already cached successful stages merely because the original submission used force. Progress is checkpoint-based, with totals unknown until traversal finishes. Failed media retain bounded per-stage error details; inspect results rather than assuming every indexed item succeeded.
 
+## Events and feedback (M6)
+
+`events`, `event ID`, `event-create TITLE`, `event-rename ID TITLE`, `feedback MEDIA_ID [--set JSON|--clear FIELD...|--clear-all]` and `preferences [--set JSON]` all emit JSON. See the [API contract](API.md#events-and-durable-corrections-m6) for full schema details.
+
+Event grouping is conservative: no model loading, no inference, no filesystem mtime guessing and no inferred timezone. Automatic events get metadata-date titles with source/cache-key provenance. Manual events provide stable IDs and user labels. Set `event_id` in `--set` to merge/split; use `--clear event_id` (or `--clear-all`) to return a media to automatic grouping. Null `capture_time`/`gps` means unknown, not automatic evidence.
+
+`--clear` accepts one or more of `selection`, `capture_time`, `gps`, `event_id`, `segments`; `--clear-all` removes every override. Images cannot carry `segments`; audio/video segments require absolute source coverage and cannot include overlapping opposite selections.
+
 ## MCP stdio (M5)
 
 Install `python -m pip install -e ".[mcp]"`, then launch `storylens --database /local/catalog.sqlite3 serve --allow-root /mounted/media`. No listener is opened. Use the trusted installed executable in your host configuration, never an automatic package/model download command. Stdout is reserved for MCP protocol traffic; diagnostics go to stderr. See [Codex/Claude setup](INTEGRATIONS.md#mcp-setup-for-codex-and-claude-code) and [bounded result contracts](API.md).
+
+The server now also exposes event/feedback tools (M6): `list_events`, `show_event`, `create_event`, `rename_event`, `get_feedback`, `set_feedback`, `reset_feedback`, `get_preferences` and `set_preferences`. Use these to review candidates, assign manual events and adjust grouping thresholds without provider/path configuration changes.

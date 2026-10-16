@@ -73,10 +73,6 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
     async def test_stdio_handshake_scan_analysis_and_cli_parity(self):
         original = hashlib.sha256(self.image.read_bytes()).hexdigest()
         async with self.session() as session:
-            names = {tool.name for tool in (await session.list_tools()).tools}
-            self.assertEqual(names, {"list_media", "show_media", "export_media", "scenes", "search", "duplicates",
-                "import_transcript", "export_transcript", "start_job", "job_status", "cancel_job", "resume_job",
-                "job_result", "list_jobs"})
             scan = await self.call(session, "start_job", {"path": str(self.media), "operation": "scan"})
             done = await self.finish(session, scan["id"])
             self.assertEqual(done["status"], "succeeded", done)

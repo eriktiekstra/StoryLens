@@ -1,6 +1,6 @@
 # JSON contract (1.0)
 
-The CLI and Python service run without a web server. [Packaged JSON Schema](../src/storylens/schemas/results-v1.schema.json) uses Draft 2020-12 for core result envelopes, metadata/technical/semantic/audio/transcript stages, duplicate pages, scene pages and semantic search. Extractor tags/provenance allow documented extension fields. Result schema version is independent of package version, catalog/job database user_version and algorithm version. M5 adds separate durable-job and bounded MCP envelope schemas, available through SDK resources below.
+The CLI and Python service run without a web server. [Packaged JSON Schema](../src/storylens/schemas/results-v1.schema.json) uses Draft 2020-12 for core result envelopes, metadata/technical/semantic/audio/transcript stages, duplicate pages, scene pages and semantic search. Extractor tags/provenance allow documented extension fields. Result schema version is independent of package version, catalog/job/feedback database user_version and algorithm version. Durable jobs, bounded MCP envelopes and [M6 curation](../src/storylens/schemas/curation-v1.schema.json) have separate schemas, available through SDK resources below.
 
 | Result | Fields |
 | --- | --- |
@@ -10,6 +10,11 @@ The CLI and Python service run without a web server. [Packaged JSON Schema](../s
 | duplicates | schema_version, mode, items, next_cursor; near mode also search |
 | scenes | schema_version, media_id, items, next_cursor, provenance |
 | search | schema_version, space, depth, metric, items, limit, ranking; no cursor |
+| events | schema_version, items (event summaries), snapshot, next_cursor, provenance |
+| event | schema_version, event (summary), items (member evidence), snapshot, next_cursor, provenance |
+| create/rename manual event | schema_version, id, title, updated_at |
+| feedback | schema_version, media_id, values, updated_at |
+| preferences | schema_version, values, updated_at |
 | Fatal handled error | schema_version, error |
 
 ## Identity, paths and stages
@@ -32,6 +37,44 @@ Exact duplicate items contain media_id and existing indexed paths. Near items co
 
 List/export/exact duplicate pages order by content ID. Pass next_cursor unchanged with the same command/filter. Near cursors encode the last lexical ID pair and bind the distance parameter. Scene cursors are offsets into the current stored scene result. Pages are not frozen snapshots of concurrent catalog/parameter changes; restart pagination after reanalysis. null means finished. Default limit50, maximum500; bounds cover record count, not bytes. Export is deliberately a page, not a full-library dump.
 
+## Events and durable corrections (M6)
+
+`events` lists summaries; `event ID` pages members separately. An event summary contains `id`, `title`, `title_provenance`, `kind` (`automatic`, `manual`, `undated`), nullable `start_time`/`end_time`, `timezone_status`, `member_count` and `warnings`. Members contain `media_id`, `selection` and `evidence`: capture-time and GPS sources, original evidence when overridden, stored-embedding provenance or null, and the join decision with available gap/span/distance/cosine evidence. Saved segment corrections appear under `evidence.segments`. Page `provenance` contains `algorithm` (`events-1`), effective `settings`, `input_digest` and `caveats`.
+
+Grouping considers at most 10,000 media identities with a current regular, nonsymlink source reference; overflow is an explicit error, not a truncated collection. It uses stored evidence only: no model loading, inference or network request. Close capture-time bursts stay coarse: scene cuts and visual dissimilarity do not fragment them. Defaults join adjacent comparable captures within 7,200 seconds, unless known GPS evidence contradicts the join by more than 50 km or total event span would exceed 43,200 seconds. Missing GPS is permissive. A longer gap up to 21,600 seconds can be bridged at cosine >=0.85 only when stored embeddings match space, depth, algorithm, provider/model identity and dimension. Each media contributes the L2-normalized mean of its valid stored unit vectors, not arbitrary cross-model or frame-pair comparisons. Bridges remain similarity hypotheses, not factual observations.
+
+Offset-aware times compare after normalization to UTC; their date titles also use UTC. Naive capture times remain a separate, explicitly `timezone_ambiguous` walltime domain. No local timezone, filesystem mtime or missing midnight is inferred. Missing/invalid capture times enter `Undated media — review required`, an `undated` review bucket that asserts no factual event or member relationship. Generated date titles include source/cache-key provenance; no place or person names are invented.
+
+Automatic IDs are `automatic-<membership SHA-256>` (undated buckets use `undated-<membership SHA-256>`); changing members changes their identity. `create_event(title)` registers a stable `manual:<uuid hex>` ID; `rename_event(event_id, title)` changes only a registered manual title. Titles must be nonblank and at most 256 characters. An empty registered event is not a grouped candidate until a current referenced member is assigned. Set member `event_id` corrections to merge chosen media into one manual event or split a subset into another; rename those events for user-supplied labels. Manual membership may cross incomparable time domains, but then the combined range is null with a warning. Reset/unassign members to return them to automatic grouping.
+
+Feedback is an atomic partial object patch. Omitted keys stay unchanged; unknown keys and invalid values fail without a partial write:
+
+| Key | Accepted value and meaning |
+| --- | --- |
+| `selection` | `neutral`, `include`, `exclude`; a review annotation, never source deletion or automatic removal from groups |
+| `capture_time` | ISO8601 date-time with `T` and optional offset, or null; date-only strings are not capture evidence |
+| `gps` | `{ "latitude": number, "longitude": number }` within [-90,90]/[-180,180], or null |
+| `event_id` | Known registered manual ID, or null for no manual assignment; automatic IDs are not assignable |
+| `segments` | At most 100 objects with `start_seconds`, `end_seconds`, `selection` (`include`/`exclude`) and optional `label` (<=256 characters) |
+
+Explicit null `capture_time`/`gps` means **unknown**, overriding generated evidence. Reset removes the field so generated evidence applies again; it is not the same as setting null. Segment ranges are half-open absolute source intervals `[start_seconds,end_seconds)`, not zero-based editor offsets. Nonempty segments require known audio/video source coverage; finite endpoints must satisfy source origin <= start < end <= source end. Positive duration does not require a nonnegative source origin. Opposite include/exclude ranges cannot overlap; touching endpoints and same-choice overlap are allowed. Images cannot carry segments. These are selection annotations, not destructive edits.
+
+Collection preferences are persisted patches limited to grouping settings, never provider/model paths, credentials or approved roots:
+
+| Setting | Default | Validation |
+| --- | --- | --- |
+| `gap_seconds` | 7200 | finite, >0, <=604800 |
+| `distance_km` | 50 | finite, >0, <=20040 |
+| `semantic_gap_seconds` | 21600 | finite, >0, <=604800 |
+| `semantic_similarity` | 0.85 | finite, 0..1 |
+| `max_event_seconds` | 43200 | finite, >0, <=31536000 |
+| `semantic_depth` | `standard` | `fast`, `standard`, `deep` |
+
+The merged settings must satisfy `gap_seconds <= semantic_gap_seconds <= max_event_seconds`. Feedback/preferences envelopes return `values` and `updated_at` (null before any saved value); preferences always report complete effective defaults plus overrides. Corrections, manual event registry and preferences live independently in private `<catalogstem>.feedback.sqlite3` (SQLite schema 1). Generated catalog schema remains 2. Metadata/AI reanalysis, including force, preserves this sidecar. Content IDs let rescanned moved bytes retain their corrections. Back up the sidecar separately from generated analysis.
+
+Event/member pages default to 50, core/CLI limit 1..500, MCP limit 1..100. Pass `next_cursor` unchanged for the same list or member query; null means finished. Cursors bind current effective evidence, grouping settings, feedback state and query scope. Changed state or using a list cursor for members/another event is rejected; restart pagination and refresh automatic IDs. `snapshot` is a state fingerprint, **not** a permanent frozen snapshot or a promise to serve old evidence later.
+
+
 ## Python service
 
 ~~~python
@@ -47,6 +90,8 @@ with Analyzer(Config(Path("/absolute/local/catalog.sqlite3"))) as app:
 
 Use stage="metadata"/"technical" for inference-free subsets; use depth="fast"/"standard"/"deep" with all/semantic to opt into semantics. stage="semantic" defaults to standard and includes the video technical prerequisite. Local transcription uses stage="transcript" and configured audio_transcription_model. app.import_transcript(media_id, path, format=None, offset=0, language=None) stores supplied evidence; app.transcript(media_id, format="json"/"srt"/"vtt") exports it. force=True recomputes selected stages. No plugin ABI or HTTP endpoint is provided.
 
+M6 methods are `app.events(limit=50, after="")`, `app.event(event_id, limit=50, after="")`, `app.create_event(title)`, `app.rename_event(event_id, title)`, `app.feedback(media_id)`, `app.set_feedback(media_id, patch)`, `app.reset_feedback(media_id, fields=None)`, `app.preferences()` and `app.set_preferences(patch)`. Reset with no fields removes all overrides; a list removes only named fields.
+
 ## Durable jobs (M5)
 
 `storylens.jobs.JobManager(config, roots)` supplies start(path, analyze=True, stage="all", depth=None, force=False), status(id), cancel(id), resume(id), result(id) and list(limit=50, after=""). CLI `job` and MCP call the same manager. Roots are explicit existing media directories, not a tool-call override. State lives in a local catalog-adjacent `.jobs.sqlite3` database.
@@ -57,10 +102,16 @@ Cancellation is persisted and checked at file/stage and catalog commit boundarie
 
 ## MCP stdio envelopes (M5)
 
-Install the optional mcp extra, then use `serve --allow-root DIR` with trusted startup configuration. Tools are list_media, show_media, export_media, scenes, search, duplicates, import_transcript, export_transcript, start_job, job_status, cancel_job, resume_job, job_result and list_jobs. Call errors set MCP isError; invalid typed arguments are not successful empty results. The SDK publishes typed input schemas; it does not grant filesystem permission.
+Install the optional mcp extra, then use `serve --allow-root DIR` with trusted startup configuration. The 23 tools are list_media, show_media, export_media, scenes, search, duplicates, import_transcript, export_transcript, start_job, job_status, cancel_job, resume_job, job_result, list_jobs, list_events, show_event, create_event, rename_event, get_feedback, set_feedback, reset_feedback, get_preferences and set_preferences. Call errors set MCP isError; invalid typed arguments are not successful empty results. The SDK publishes typed input schemas; it does not grant filesystem permission.
+
+The nine M6 tools mirror the service methods: `list_events(limit=50, after="")`, `show_event(event_id, limit=50, after="")`, `create_event(title)`, `rename_event(event_id, title)`, `get_feedback(media_id)`, `set_feedback(media_id, patch)`, `reset_feedback(media_id, fields=None)`, `get_preferences()` and `set_preferences(patch)`. Feedback/preferences `patch` arguments are typed JSON objects, not JSON-encoded strings; only explicitly supplied fields are patched. Nested GPS/segment objects reject unknown keys.
+
+MCP filters unapproved media **before** grouping. A manual relationship spanning approved and unapproved sources fails closed instead of revealing a private title/member or allowing unauthorized assignment/rename. Approve all roots containing that event's assigned sources, or clear your approved media's own assignment with `event_id:null`/reset of `event_id` (or all its overrides). Preferences affect the catalog collection, not just one MCP root, but cannot alter startup provider/path configuration.
 
 MCP record pages default to50 (search20), max100. show/export omit large scenes, semantic items and transcript segments with explicit counts/omission flags. Arbitrary stored metadata has a bounded response budget, individual text max16384 characters, and truncated_fields disclosure. These transport summaries are not lossless copies of full core stage payloads. Scene pages and source evidence preserve available absolute source timing; artifact paths outside approved roots are redacted.
 
+The generic size bound also applies to curation evidence: `truncated:true` and `truncated_fields` explicitly identify omitted content. Do not treat such a response as complete or advance past omitted evidence; lower `limit` and repeat the **same input cursor**. A single oversized member can still need the full local CLI/core result.
+
 export_transcript returns lossless serialized JSON/SRT/VTT character pages: text, total_characters and next_cursor. Concatenate text until next_cursor is null; keep format and stored transcript unchanged. Default page8192, maximum16384 characters. No arbitrary output-file writes are exposed.
 
-Read SDK resources `storylens://schemas/results-v1` (installed core results), `storylens://schemas/jobs-v1` (durable state) and `storylens://schemas/mcp-v1` (bounded transport envelopes). The core schema ships inside the wheel, independent of checkout cwd. CLI/core schemas retain their distinct contracts.
+Read SDK resources `storylens://schemas/results-v1` (installed core results), `storylens://schemas/jobs-v1` (durable state), `storylens://schemas/mcp-v1` (bounded transport envelopes) and `storylens://schemas/curation-v1` (events, corrections, preferences and explicit truncated transport). The packaged schemas are independent of checkout cwd. CLI/core schemas retain their distinct contracts.

@@ -2,9 +2,9 @@
 
 Local-first, editor-independent media intelligence. MIT licensed; free to self-host.
 
-**Current package: 0.5.0 — M1–M5: indexing, technical analysis, local semantics, audio/transcripts and an agent API.** StoryLens indexes referenced media, preserves metadata, measures image/audio signals, finds duplicate candidates and extracts timestamped video scenes. Opt-in local models provide image/text retrieval, captions and transcription. Durable local jobs and an optional MCP stdio server share the same service as the CLI. No automatic model downloads, cloud fallback, telemetry, subscriptions or accounts. Default analysis remains inference-free.
+Current package: 0.6.0 — M1–M6: indexing, technical analysis, local semantics, audio/transcripts, an agent API, and coarse event grouping with durable corrections. StoryLens indexes referenced media, preserves metadata, measures image/audio signals, finds duplicate candidates, extracts timestamped video scenes, and groups stored evidence into reviewable event candidates. Opt-in local models provide image/text retrieval, captions and transcription. Durable local jobs and an optional MCP stdio server share the same service as the CLI. No automatic model downloads, cloud fallback, telemetry, subscriptions or accounts. Default analysis remains inference-free.
 
-Event grouping, feedback and storyboards remain **planned, not implemented**. See [architecture](ARCHITECTURE.md), [milestones](docs/IMPLEMENTATION_PLAN.md), and primary-source research for [components](docs/research/media-ecosystem.md), [existing applications](docs/research/existing-applications.md), and [FilmCraft/MCP](docs/research/filmcraft-mcp.md).
+Storyboards and editor adapters remain **planned, not implemented**. See [architecture](ARCHITECTURE.md), [milestones](docs/IMPLEMENTATION_PLAN.md), and primary-source research for [components](docs/research/media-ecosystem.md), [existing applications](docs/research/existing-applications.md), and [FilmCraft/MCP](docs/research/filmcraft-mcp.md).
 
 ## Installation
 
@@ -35,6 +35,9 @@ storylens --json show 'sha256:ID_FROM_LIST'
 storylens --json duplicates --mode exact
 storylens --json duplicates --mode near --distance 6 --limit 20
 storylens --json scenes 'sha256:VIDEO_ID' --limit 20
+storylens --json events --limit 20
+storylens --json feedback 'sha256:ID_FROM_LIST' --set '{"selection":"include"}'
+storylens --json event-create 'User title'
 storylens export --limit 50 > analysis-page.json
 ~~~
 
@@ -64,7 +67,7 @@ FAST embeds one representative scene; STANDARD embeds/describes up to eight unif
 ## Reference
 
 - [CLI, configuration, media formats, privacy and NAS operation](docs/USAGE.md)
-- [JSON contract](docs/API.md) and [packaged JSON Schema](src/storylens/schemas/results-v1.schema.json)
+- [JSON contract](docs/API.md) and [packaged JSON Schemas](src/storylens/schemas/)
 - [AI/provider, MCP-host and optional FilmCraft boundaries](docs/INTEGRATIONS.md)
 - [Security](SECURITY.md), [contributing](CONTRIBUTING.md), [changelog](CHANGELOG.md)
 
@@ -76,6 +79,6 @@ No HTTP listener or editor dependency is introduced. `storylens serve --allow-ro
 python -m unittest discover -s tests -v
 ~~~
 
-The suite covers metadata/technical/audio behavior, semantic cache/evidence/ranking/privacy boundaries, durable job restart/cancellation/lease fencing and real official-SDK MCP subprocess calls. CPU SigLIP inference and installed local faster-whisper transcription have separate real-model evidence; see [integration evidence](docs/INTEGRATIONS.md#verification-and-limits) for revisions and quality limits.
+The suite covers metadata/technical/audio behavior, semantic cache/evidence/ranking/privacy boundaries, durable job restart/cancellation/lease fencing, real official-SDK MCP subprocess calls, event grouping and durable feedback survival through reanalysis. CPU SigLIP inference and installed local faster-whisper transcription have separate real-model evidence; see [integration evidence](docs/INTEGRATIONS.md#verification-and-limits) for revisions and quality limits.
 
-Linux/macOS/Windows core/media checks passed across Python 3.11/3.12 in GitHub Actions. M5 is verified with 159 combined Linux tests and installed-wheel core/MCP smokes. This is not proof of NAS throughput, universal GPU/codec support, full RAW support, HDR fidelity, broad semantic accuracy or FilmCraft interoperability.
+Linux/macOS/Windows core/media checks passed across Python 3.11/3.12 in GitHub Actions. M5–M6 are verified with real SDK subprocess, CLI parity, privacy fail-closed, snapshot invalidation and installed-wheel core/MCP smokes. This is not proof of NAS throughput, universal GPU/codec support, full RAW support, HDR fidelity, broad semantic/event accuracy or FilmCraft interoperability.

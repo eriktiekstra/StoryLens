@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 — 2026-10-16 (M6 events and durable corrections)
+
+- Added inference-free coarse event grouping from stored metadata, GPS and compatible normalized embeddings. Time is the primary join signal; embeddings may bridge a longer gap only within the same space, depth, algorithm, provider/model identity and dimension. Conservative defaults avoid over-fragmentation and enforce span/GPS bounds; explicit timezone ambiguity and undated review buckets are preserved.
+- Added durable manual events with stable `manual:<uuid hex>` IDs, and independent user corrections/preferences stored in a private `<catalogstem>.feedback.sqlite3` sidecar. Feedback survives metadata/AI reanalysis, forced reruns and rescanned moved bytes. Corrections cover selection, capture time/GPS, manual event assignment and half-open source-time segments for audio/video.
+- Added M6 CLI commands: `events`, `event ID`, `event-create TITLE`, `event-rename ID TITLE`, `feedback MEDIA_ID`, and `preferences`; all emit JSON. Added nine MCP tools (`list_events`, `show_event`, `create_event`, `rename_event`, `get_feedback`, `set_feedback`, `reset_feedback`, `get_preferences`, `set_preferences`) and the `storylens://schemas/curation-v1` resource, raising the typed tool count to 23.
+- Added `src/storylens/schemas/curation-v1.schema.json` describing event pages, member evidence, feedback, preferences, manual events and explicit truncated-transport envelopes. Pages bind a state snapshot; stale, wrong-scope or post-change cursors are rejected.
+- Added MCP fail-closed behavior: unapproved media are filtered before grouping, and manual relationships spanning approved and unapproved roots cannot disclose or mutate private titles/members. Clearing the approved source's own assignment restores automatic grouping.
+
 ## 0.5.0 — 2026-10-16 (M5 agent API and durable jobs)
 
 - Added durable detached local scan/analyze jobs with CLI and MCP start/status/result/cancel/resume/list, persisted progress/partial failures, 2-second heartbeats and 30-second ownership leases.

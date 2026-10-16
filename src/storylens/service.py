@@ -1,5 +1,6 @@
 """Shared application service, independent of CLI and editor transports."""
 
+import base64
 import hashlib
 import json
 from pathlib import Path
@@ -24,12 +25,17 @@ class Analyzer:
         self._video_extractor = None
         self._embeddings = None
         self._vision = None
+        self._feedback = None
 
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
-        self.catalog.close()
+        try:
+            if self._feedback is not None:
+                self._feedback.close()
+        finally:
+            self.catalog.close()
 
     def _technical(self, media_kind):
         if media_kind == "image":
@@ -215,6 +221,109 @@ class Analyzer:
         self.catalog.save(media_id, "transcript", key, result)
         self.catalog.save_transcript(media_id, result)
         return result
+
+    def _user_state(self):
+        if self._feedback is None:
+            from .feedback import FeedbackStore
+            self._feedback = FeedbackStore(self.config.database)
+        return self._feedback
+
+    def feedback(self, media_id):
+        self.catalog.get(media_id)
+        return self._user_state().get(media_id)
+
+    def set_feedback(self, media_id, patch):
+        media = self.catalog.get(media_id)
+        return self._user_state().update(media_id, patch, media)
+
+    def reset_feedback(self, media_id, fields=None):
+        self.catalog.get(media_id)
+        return self._user_state().reset(media_id, fields)
+
+    def preferences(self):
+        return self._user_state().preferences()
+
+    def set_preferences(self, patch):
+        return self._user_state().set_preferences(patch)
+
+    def create_event(self, title):
+        return self._user_state().create_event(title)
+
+    def rename_event(self, event_id, title):
+        return self._user_state().rename_event(event_id, title)
+
+    def _event_snapshot(self):
+        from .events import group_media
+        state = self._user_state().snapshot()
+
+        def inputs():
+            after, count = "", 0
+            while True:
+                page = self.catalog.page(100, after)
+                for row in page["items"]:
+                    media = self.catalog.get(row["id"])
+                    if not any(Path(p["path"]).is_file() and not Path(p["path"]).is_symlink()
+                               for p in media["paths"]):
+                        continue
+                    count += 1
+                    if count > 10000:
+                        raise ValueError("Event grouping supports at most 10000 referenced media per catalog")
+                    media["feedback"] = state["media"].get(media["id"], {})
+                    yield media
+                after = page["next_cursor"]
+                if after is None:
+                    break
+
+        result = group_media(inputs(), settings=state["preferences"], manual_events=state["events"])
+        snapshot = hashlib.sha256(json.dumps({"evidence": result["provenance"], "feedback": state},
+                                 sort_keys=True, allow_nan=False).encode()).hexdigest()
+        return result, snapshot
+
+    @staticmethod
+    def _event_offset(after, snapshot, scope, limit):
+        if type(limit) is not int or not 1 <= limit <= 500:
+            raise ValueError("limit must be between 1 and 500")
+        if not after:
+            return 0
+        try:
+            if not isinstance(after, str) or len(after) > 512:
+                raise ValueError()
+            token = json.loads(base64.b64decode(after, altchars=b"-_", validate=True))
+            if not isinstance(token, list) or len(token) != 3:
+                raise ValueError()
+            if token[0] != snapshot or token[1] != scope:
+                raise ValueError("Event cursor is stale or belongs to another query; restart pagination")
+            if type(token[2]) is not int or not 0 <= token[2] <= 10000:
+                raise ValueError()
+            return token[2]
+        except (ValueError, TypeError, UnicodeError) as error:
+            raise ValueError("Invalid or stale event cursor; restart pagination") from error
+
+    @staticmethod
+    def _event_cursor(snapshot, scope, offset):
+        return base64.urlsafe_b64encode(json.dumps([snapshot, scope, offset]).encode()).decode()
+
+    def events(self, *, limit=50, after=""):
+        result, snapshot = self._event_snapshot()
+        start = self._event_offset(after, snapshot, "events", limit)
+        end = start + limit
+        items = [{key: value for key, value in event.items() if key != "members"}
+                 for event in result["events"][start:end]]
+        return {"schema_version": "1.0", "items": items, "snapshot": snapshot,
+                "next_cursor": self._event_cursor(snapshot, "events", end) if end < len(result["events"]) else None,
+                "provenance": result["provenance"]}
+
+    def event(self, event_id, *, limit=50, after=""):
+        result, snapshot = self._event_snapshot()
+        start = self._event_offset(after, snapshot, event_id, limit)
+        event = next((item for item in result["events"] if item["id"] == event_id), None)
+        if event is None:
+            raise ValueError("Unknown event ID; refresh event candidates")
+        end = start + limit
+        return {"schema_version": "1.0", "event": {key: value for key, value in event.items() if key != "members"},
+                "items": event["members"][start:end], "snapshot": snapshot,
+                "next_cursor": self._event_cursor(snapshot, event_id, end) if end < len(event["members"]) else None,
+                "provenance": result["provenance"]}
 
     def show(self, media_id):
         return {"schema_version": "1.0", "media": self.catalog.get(media_id)}

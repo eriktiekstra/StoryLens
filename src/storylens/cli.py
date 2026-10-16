@@ -84,6 +84,26 @@ def parser():
     jobs = actions.add_parser("list")
     jobs.add_argument("--limit", type=int, default=50)
     jobs.add_argument("--after", default="")
+    events = commands.add_parser("events", help="Page coarse event candidates without inference")
+    events.add_argument("--limit", type=int, default=50)
+    events.add_argument("--after", default="")
+    event = commands.add_parser("event", help="Page member evidence of an automatic or manual event")
+    event.add_argument("event_id")
+    event.add_argument("--limit", type=int, default=50)
+    event.add_argument("--after", default="")
+    create = commands.add_parser("event-create", help="Create a stable manual event for explicit assignments")
+    create.add_argument("title")
+    rename = commands.add_parser("event-rename", help="Rename a user-owned manual event")
+    rename.add_argument("event_id")
+    rename.add_argument("title")
+    feedback = commands.add_parser("feedback", help="Read or patch corrections, independent of AI data")
+    feedback.add_argument("media_id")
+    edit = feedback.add_mutually_exclusive_group()
+    edit.add_argument("--set", dest="patch", type=json.loads, help="JSON correction patch; omitted fields stay unchanged")
+    edit.add_argument("--clear", nargs="+", choices=("selection", "capture_time", "gps", "event_id", "segments"))
+    edit.add_argument("--clear-all", action="store_true", help="Remove all user overrides for this identity")
+    preferences = commands.add_parser("preferences", help="Read or patch collection grouping thresholds")
+    preferences.add_argument("--set", dest="patch", type=json.loads, help="JSON preference patch")
     return cli
 
 
@@ -144,6 +164,25 @@ def main(argv=None):
                 result = storylens.duplicates(mode=args.mode, max_distance=args.distance, limit=args.limit, after=args.after)
             elif args.command == "scenes":
                 result = storylens.scenes(args.media_id, limit=args.limit, after=args.after)
+            elif args.command == "events":
+                result = storylens.events(limit=args.limit, after=args.after)
+            elif args.command == "event":
+                result = storylens.event(args.event_id, limit=args.limit, after=args.after)
+            elif args.command == "event-create":
+                result = storylens.create_event(args.title)
+            elif args.command == "event-rename":
+                result = storylens.rename_event(args.event_id, args.title)
+            elif args.command == "feedback":
+                if args.patch is not None:
+                    result = storylens.set_feedback(args.media_id, args.patch)
+                elif args.clear_all:
+                    result = storylens.reset_feedback(args.media_id)
+                elif args.clear is not None:
+                    result = storylens.reset_feedback(args.media_id, args.clear)
+                else:
+                    result = storylens.feedback(args.media_id)
+            elif args.command == "preferences":
+                result = storylens.preferences() if args.patch is None else storylens.set_preferences(args.patch)
             elif args.command == "show":
                 result = storylens.show(args.media_id)
             elif args.command == "transcript":
@@ -157,7 +196,8 @@ def main(argv=None):
                 result = {"schema_version": "1.0", **storylens.catalog.page(args.limit, args.after, args.kind)}
                 if args.command == "export":
                     result["items"] = [storylens.catalog.get(item["id"]) for item in result["items"]]
-        emit(result, args.json or args.command == "export")
+        emit(result, args.json or args.command in {"export", "events", "event", "event-create",
+                                                "event-rename", "feedback", "preferences"})
         return 2 if result.get("failed") else 0
     except (OSError, ValueError, TypeError, RuntimeError, KeyError, sqlite3.Error) as error:
         if args.json and args.command != "serve":

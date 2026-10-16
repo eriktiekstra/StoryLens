@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://storylens.local/schemas/curation-v1.schema.json",
+  "title": "StoryLens event candidates and independent user corrections v1",
+  "description": "Core curation envelopes. MCP may return an explicitly truncated transport envelope; lower the page size when evidence is omitted.",
+  "anyOf": [
+    {"$ref": "#/$defs/event_page"},
+    {"$ref": "#/$defs/member_page"},
+    {"$ref": "#/$defs/feedback"},
+    {"$ref": "#/$defs/preferences"},
+    {"$ref": "#/$defs/manual_event"},
+    {"$ref": "#/$defs/truncated_transport"}
+  ],
+  "$defs": {
+    "version": {"const": "1.0"},
+    "media_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "manual_id": {"type": "string", "pattern": "^manual:[0-9a-f]{32}$"},
+    "event_id": {"type": "string", "pattern": "^(manual:[0-9a-f]{32}|(automatic|undated)-[0-9a-f]{64})$"},
+    "updated_at": {"type": ["string", "null"]},
+    "snapshot": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "cursor": {"type": ["string", "null"], "maxLength": 512},
+    "timezone": {"enum": ["explicit_offset", "timezone_ambiguous", "unresolved"]},
+    "selection": {"enum": ["neutral", "include", "exclude"]},
+    "gps": {
+      "type": "object", "required": ["latitude", "longitude"], "additionalProperties": false,
+      "properties": {
+        "latitude": {"type": "number", "minimum": -90, "maximum": 90},
+        "longitude": {"type": "number", "minimum": -180, "maximum": 180}
+      }
+    },
+    "segment": {
+      "type": "object", "required": ["start_seconds", "end_seconds", "selection"], "additionalProperties": false,
+      "description": "Half-open absolute source range; positive duration and source coverage are validated by the service. Opposite selections may not overlap.",
+      "properties": {
+        "start_seconds": {"type": "number"}, "end_seconds": {"type": "number"},
+        "selection": {"enum": ["include", "exclude"]}, "label": {"type": "string", "maxLength": 256}
+      }
+    },
+    "feedback_values": {
+      "type": "object", "additionalProperties": false,
+      "description": "Omitted fields retain generated evidence. Explicit null capture/GPS values mark unknown; reset removes the override.",
+      "properties": {
+        "selection": {"$ref": "#/$defs/selection"},
+        "capture_time": {"type": ["string", "null"], "maxLength": 64},
+        "gps": {"anyOf": [{"$ref": "#/$defs/gps"}, {"type": "null"}]},
+        "event_id": {"anyOf": [{"$ref": "#/$defs/manual_id"}, {"type": "null"}]},
+        "segments": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/segment"}}
+      }
+    },
+    "settings": {
+      "type": "object", "additionalProperties": false,
+      "required": ["gap_seconds", "distance_km", "semantic_gap_seconds", "semantic_similarity", "max_event_seconds", "semantic_depth"],
+      "description": "Service also enforces gap_seconds <= semantic_gap_seconds <= max_event_seconds.",
+      "properties": {
+        "gap_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 604800},
+        "distance_km": {"type": "number", "exclusiveMinimum": 0, "maximum": 20040},
+        "semantic_gap_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 604800},
+        "semantic_similarity": {"type": "number", "minimum": 0, "maximum": 1},
+        "max_event_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 31536000},
+        "semantic_depth": {"enum": ["fast", "standard", "deep"]}
+      }
+    },
+    "feedback": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "media_id", "values", "updated_at"],
+      "properties": {
+        "schema_version": {"$ref": "#/$defs/version"}, "media_id": {"$ref": "#/$defs/media_id"},
+        "values": {"$ref": "#/$defs/feedback_values"}, "updated_at": {"$ref": "#/$defs/updated_at"}
+      }
+    },
+    "preferences": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "values", "updated_at"],
+      "properties": {
+        "schema_version": {"$ref": "#/$defs/version"}, "values": {"$ref": "#/$defs/settings"},
+        "updated_at": {"$ref": "#/$defs/updated_at"}
+      }
+    },
+    "manual_event": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "id", "title", "updated_at"],
+      "properties": {
+        "schema_version": {"$ref": "#/$defs/version"}, "id": {"$ref": "#/$defs/manual_id"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 256}, "updated_at": {"type": "string"}
+      }
+    },
+    "event_summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "title", "title_provenance", "kind", "start_time", "end_time", "timezone_status", "member_count", "warnings"],
+      "properties": {
+        "id": {"$ref": "#/$defs/event_id"}, "title": {"type": "string", "maxLength": 256},
+        "title_provenance": {"type": "object", "required": ["kind"], "properties": {
+          "kind": {"enum": ["metadata_date", "user", "review_bucket"]}
+        }},
+        "kind": {"enum": ["automatic", "manual", "undated"]},
+        "start_time": {"type": ["string", "null"]}, "end_time": {"type": ["string", "null"]},
+        "timezone_status": {"$ref": "#/$defs/timezone"},
+        "member_count": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "member": {
+      "type": "object", "additionalProperties": false,
+      "required": ["media_id", "selection", "evidence"],
+      "properties": {
+        "media_id": {"$ref": "#/$defs/media_id"}, "selection": {"$ref": "#/$defs/selection"},
+        "evidence": {
+          "type": "object", "required": ["capture_time", "gps", "embedding", "join"],
+          "properties": {
+            "capture_time": {"type": "object", "required": ["source", "value", "timezone_status"], "properties": {
+              "source": {"type": "string"}, "value": {"type": ["string", "null"]},
+              "timezone_status": {"$ref": "#/$defs/timezone"}
+            }},
+            "gps": {"type": "object", "required": ["source", "value"], "properties": {
+              "source": {"type": "string"}, "value": {"anyOf": [{"$ref": "#/$defs/gps"}, {"type": "null"}]}
+            }},
+            "embedding": {"type": ["object", "null"]},
+            "join": {"type": "object", "required": ["decision", "joined"], "properties": {
+              "decision": {"type": "string"}, "joined": {"type": "boolean"}
+            }},
+            "segments": {"type": "object", "required": ["source", "values"], "properties": {
+              "source": {"const": "feedback.segments"},
+              "values": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/segment"}}
+            }}
+          }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object", "required": ["algorithm", "settings", "input_digest", "caveats"],
+      "properties": {
+        "algorithm": {"type": "string"}, "settings": {"$ref": "#/$defs/settings"},
+        "input_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "caveats": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "event_page": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "items", "snapshot", "next_cursor", "provenance"],
+      "properties": {
+        "schema_version": {"$ref": "#/$defs/version"}, "snapshot": {"$ref": "#/$defs/snapshot"},
+        "items": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/event_summary"}},
+        "next_cursor": {"$ref": "#/$defs/cursor"}, "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "member_page": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "event", "items", "snapshot", "next_cursor", "provenance"],
+      "properties": {
+        "schema_version": {"$ref": "#/$defs/version"}, "snapshot": {"$ref": "#/$defs/snapshot"},
+        "event": {"$ref": "#/$defs/event_summary"},
+        "items": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/member"}},
+        "next_cursor": {"$ref": "#/$defs/cursor"}, "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "truncated_transport": {
+      "type": "object", "required": ["schema_version", "truncated", "truncated_fields"],
+      "description": "Explicit MCP size-limited envelope. Lower limit and repeat the same cursor to retrieve fuller member evidence.",
+      "properties": {
+        "schema_version": {"$ref": "#/$defs/version"}, "truncated": {"const": true},
+        "truncated_fields": {"type": "array", "maxItems": 100, "items": {"type": "string"}}
+      }
+    }
+  }
+}

@@ -2,7 +2,7 @@
 
 ## MVP boundary
 
-**M1–M5 are implemented**: local/NAS ingestion, metadata, independently cached technical and local-semantic stages, duplicates, timestamped scenes/JPEGs, bounded audio analysis, transcript import/export, optional local audio inference, durable jobs and optional MCP stdio. This is not the complete semantic product: events, feedback and storyboards remain future work. Never expose fake implementations for these.
+**M1–M6 are implemented**: local/NAS ingestion, metadata, independently cached technical and local-semantic stages, duplicates, timestamped scenes/JPEGs, bounded audio analysis, transcript import/export, optional local audio inference, durable jobs, optional MCP stdio, coarse event grouping from stored evidence, durable manual events, independent user corrections/preferences and a packaged curation schema. Storyboards remain future work. Never expose fake implementations for these.
 
 ## Milestones
 
@@ -13,7 +13,7 @@
 | M3 — local semantics (complete) | Ollama vision and local CLIP/SigLIP embeddings; natural-language/image similarity; selected-frame descriptions; real FAST/STANDARD/DEEP coverage | Offline installed SigLIP CPU image/text smoke; real cloud-disabled Ollama/Moondream captions; depth/source-time evidence tests; same-space retrieval evaluation; real model-content cache invalidation without metadata/technical invalidation |
 | M4 — audio (complete) | Import existing timestamped transcripts first; optional faster-whisper; speech/silence/quality; separate optional diarization and sound classifiers | Multilingual timing fixtures; import roundtrip; missing GPU/model/timeout behavior; no required cloud access |
 | M5 — agent API (complete) | Official SDK MCP stdio; durable start/status/cancel/resume jobs; bounded result pages and packaged schemas; Codex/Claude setup | Actual SDK subprocess client; restart/cancellation/lease fencing and root authorization; CLI/MCP parity; core and MCP installed-wheel smoke |
-| M6 — events and feedback | Time/GPS/semantic grouping; titles with provenance; manual corrections and preferences independent of AI data | Avoid over-fragmentation evaluation; explicit timezone ambiguity; feedback survives reanalysis |
+| M6 — events and feedback (complete) | Time/GPS/semantic grouping from stored evidence; titles with provenance; durable manual events; corrections/preferences independent of AI data in private sidecar; 23 MCP tools; curation schema | Avoid over-fragmentation evaluation; explicit timezone ambiguity; feedback survives reanalysis and moved bytes; privacy fail-closed for mixed-root manual events |
 | M7 — recommendations | Separate technical/relevance/story scores; configurable strategies; editable portable storyboard with duration/required/excluded media | Source-time bounds, required/excluded invariants, meaningful conversation preservation, deterministic budget behavior |
 | M8 — optional FilmCraft | Map verified FilmCraft tools to storyboard; existing transcript import; agent-mediated review/edit/export | Verify actual deployed tools first; consented end-to-end holiday workflow; no core editor dependency |
 | M9 — release | Profiling, batch/GPU scheduling, packaging, optional Docker, platform CI, operational guides | Large NAS collection benchmarks; macOS/Linux/Windows and failure matrix; license audit; reproducible distribution |
@@ -26,7 +26,7 @@ Use generated redistributable fixtures, not private family media. Keep behavior 
 
 ## Open decisions
 
-FilmCraft interface identity must be verified before tool mappings. Model choice and revisions are configuration, not business logic. Do not promise quantitative recommendation accuracy without a labeled evaluation set. Full RAW/HEIC/HDR support depends on platform codecs and explicit fidelity tests. An optional ExifTool metadata pass may follow M1; do not silently install it. Product-level semantic MVP is M1–M7; each milestone must work alone before proceeding.
+FilmCraft interface identity must be verified before tool mappings. Model choice and revisions are configuration, not business logic. Do not promise quantitative recommendation accuracy or broad semantic/event accuracy without a labeled evaluation set. Full RAW/HEIC/HDR support depends on platform codecs and explicit fidelity tests. An optional ExifTool metadata pass may follow M1; do not silently install it. Product-level semantic MVP is M1–M7; each milestone must work alone before proceeding.
 
 ## M2 verified boundary
 
@@ -42,4 +42,4 @@ Real SigLIP CPU features are normalized 768-dimensional vectors and ran with all
 
 Official MCP2.3 stdio ClientSession/stdio_client tests exercise subprocess initialization, typed calls, schema resources, authorized query pages, durable jobs across reconnect, explicit errors and CLI parity. Detached worker tests cover submitter exit, queue continuation, cancellation, expired-lease interruption/resume, cache-preserving forced-work resume and stale-owner catalog-write fencing. Bounded transport summaries disclose omissions; serialized transcript pages are lossless. Built-wheel smoke proves core jobs work without the SDK and installed MCP resources work without checkout files. The combined Linux suite passes159 tests.
 
-Cancellation remains stage/commit-boundary cooperative; current hashing/model work may finish first. Heartbeat leases are not a distributed multi-host scheduler. Codex/Claude launch snippets follow official host configuration, but those host applications were not launched here. No HTTP listener, cloud provider, event grouping, feedback or storyboard implementation is claimed.
+Cancellation remains stage/commit-boundary cooperative; current hashing/model work may finish first. Heartbeat leases are not a distributed multi-host scheduler. Codex/Claude launch snippets follow official host configuration, but those host applications were not launched here. No HTTP listener, cloud provider or storyboard implementation is claimed; events/feedback/corrections are implemented in M6.
