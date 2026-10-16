@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fixed audio-worker timeout, cancellation and output-limit cleanup on Windows; POSIX retains process-group termination.
+- Install and verify FFmpeg/ffprobe on every GitHub Actions OS so the full media suite runs on Linux, macOS and Windows rather than relying on preinstalled tools.
+
 ## 0.4.0 — 2026-10-15 (M4 audio/transcripts)
 
 - Added bounded standalone audio technical analysis: signal energy, RMS dBFS, peak amplitude, digital silence, clipping fraction, silence segments and source-time provenance with stream-origin preservation.

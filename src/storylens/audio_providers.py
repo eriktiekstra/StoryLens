@@ -164,7 +164,10 @@ class AudioModelExtractor:
 
         def kill():
             try:
-                os.killpg(process.pid, signal.SIGKILL)
+                if sys.platform == "win32":
+                    process.kill()
+                else:
+                    os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
 
