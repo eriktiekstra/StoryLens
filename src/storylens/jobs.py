@@ -69,12 +69,12 @@ def _launch_windows(command, environment, directory):
 
     DETACHED_PROCESS alone still inherits a Windows Job Object. WMI owns/reaps
     the independent worker; no transport handles or caller credentials are sent.
-    The fixed PowerShell program receives only JSON data on stdin, never code.
+    The fixed program reads JSON from a private environment value, never code.
     """
     powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
     script = r"""
 $ErrorActionPreference = 'Stop'
-$request = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$request = $env:STORYLENS_WORKER_LAUNCH | ConvertFrom-Json
 $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
     # CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
     CreateFlags = [uint32]16777736
@@ -94,11 +94,17 @@ $result.ProcessId | ConvertTo-Json -Compress
                           "environment": [f"{key}={value}" for key, value in environment.items()]})
     try:
         result = subprocess.run([str(powershell), "-NoProfile", "-NonInteractive", "-Command", script],
-            input=request, text=True, capture_output=True, env=environment,
+            stdin=subprocess.DEVNULL, text=True, capture_output=True,
+            env=dict(environment, STORYLENS_WORKER_LAUNCH=request),
             creationflags=subprocess.CREATE_NO_WINDOW, timeout=20)
         if result.returncode or not isinstance(json.loads(result.stdout), int):
             raise ValueError(result.stderr[-2000:] or "Missing WMI process ID")
-    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+    except subprocess.TimeoutExpired as error:
+        details = (error.stderr or b"")
+        if isinstance(details, bytes):
+            details = details.decode("utf-8", "replace")
+        raise OSError("Windows worker launch exceeded its 20-second timeout: " + details[-2000:]) from error
+    except (OSError, ValueError) as error:
         raise OSError("Cannot launch independent Windows worker through local PowerShell/WMI: " + str(error)[:2000]) from error
 
 
