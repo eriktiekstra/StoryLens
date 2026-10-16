@@ -230,7 +230,7 @@ class JobManager:
         environment = _worker_environment()
         try:
             if os.name == "nt":
-                _launch_windows(command, environment, self.store.path.parent)
+                _launch_windows(command, environment, Path.cwd())
             else:
                 process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
