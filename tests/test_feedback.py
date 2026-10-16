@@ -29,10 +29,12 @@ class FeedbackTests(unittest.TestCase):
         self.base = Path(temporary.name).resolve()
         self.catalog_path = self.base / "catalog.sqlite3"
         self.store = FeedbackStore(self.catalog_path)
-        self.addCleanup(self.store.close)
         self.image = {"id": "image", "kind": "image", "analysis": {}}
         self.audio = {"id": "audio", "kind": "audio", "analysis": {
             "audio_technical": {"result": {"source_timing": {"origin_seconds": 7, "end_seconds": 10}}}}}
+
+    def tearDown(self):
+        self.store.close()
 
     @staticmethod
     def segment(start=7, end=8, selection="include", **extra):
