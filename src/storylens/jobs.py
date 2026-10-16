@@ -53,8 +53,6 @@ def _worker_environment():
     """Retain runtime discovery/cache settings, never ambient provider credentials."""
     names = {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "HOME",
              "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR",
-             "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES",
-             "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMW6432", "PSMODULEPATH",
              "PYTHONPATH", "PYTHONHOME", "PYTHONUTF8", "PYTHONIOENCODING",
              "PYTHONDONTWRITEBYTECODE", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH",
              "DYLD_FALLBACK_LIBRARY_PATH", "LANG", "LANGUAGE", "TZ",
@@ -77,23 +75,24 @@ def _launch_windows(command, environment, directory):
     powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
     script = r"""
 $ErrorActionPreference = 'Stop'
-[Console]::Error.WriteLine("launcher: script started")
-$request = $env:STORYLENS_WORKER_LAUNCH | ConvertFrom-Json
-$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
-    # CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
-    CreateFlags = [uint32]16777736
-    ShowWindow = [uint16]0
-    EnvironmentVariables = [string[]]$request.environment
-}
-[Console]::Error.WriteLine("launcher: startup instance ready")
-$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
-    CommandLine = [string]$request.command_line
-    CurrentDirectory = [string]$request.directory
-    ProcessStartupInformation = $startup
-}
-if ($result.ReturnValue -ne 0) { throw "WMI process creation failed: $($result.ReturnValue)" }
-[Console]::Error.WriteLine("launcher: worker created")
-$result.ProcessId | ConvertTo-Json -Compress
+[void][Reflection.Assembly]::LoadWithPartialName('System.Web.Extensions')
+[void][Reflection.Assembly]::LoadWithPartialName('System.Management')
+$serializer = [System.Web.Script.Serialization.JavaScriptSerializer]::new()
+$request = $serializer.DeserializeObject($env:STORYLENS_WORKER_LAUNCH)
+$startupClass = [System.Management.ManagementClass]::new('Win32_ProcessStartup')
+$startup = $startupClass.CreateInstance()
+# CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
+$startup['CreateFlags'] = [uint32]16777736
+$startup['ShowWindow'] = [uint16]0
+$startup['EnvironmentVariables'] = [string[]]$request['environment']
+$processClass = [System.Management.ManagementClass]::new('Win32_Process')
+$arguments = $processClass.GetMethodParameters('Create')
+$arguments['CommandLine'] = [string]$request['command_line']
+$arguments['CurrentDirectory'] = [string]$request['directory']
+$arguments['ProcessStartupInformation'] = $startup
+$result = $processClass.InvokeMethod('Create', $arguments, $null)
+if ($result['ReturnValue'] -ne 0) { throw "WMI process creation failed: $($result['ReturnValue'])" }
+[Console]::Out.WriteLine([int]$result['ProcessId'])
 """
     request = json.dumps({"command_line": subprocess.list2cmdline(command),
                           "directory": str(directory),
