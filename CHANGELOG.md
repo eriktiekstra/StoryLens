@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-10-16 (M5 agent API and durable jobs)
+
+- Added durable detached local scan/analyze jobs with CLI and MCP start/status/result/cancel/resume/list, persisted progress/partial failures, 2-second heartbeats and 30-second ownership leases.
+- Added strict token/attempt fencing at catalog commits, one-running-job scheduling and explicit cache-preserving resume; cancellation is cooperative between work units, not an immediate model kill.
+- Added optional official MCP 2.3 stdio transport with 14 typed tools, explicit startup-approved roots, pre-query authorization, bounded summaries and lossless transcript export pages. No HTTP server or protocol Tasks engine is introduced.
+- Packaged the core JSON Schema in the wheel and exposed core/job/transport schema resources. Corrected audio-transcription schema_version to match the actual string "1.0" result.
+- Added Codex/Claude configuration examples and operational/privacy limits. The 159-test Linux suite passes; actual SDK subprocess/CLI parity, restart/cancellation/fencing, unauthorized paths and core/MCP installed-wheel behavior were exercised.
+
 
 - Fixed audio-worker timeout, cancellation and output-limit cleanup on Windows; POSIX retains process-group termination.
 - Install and verify FFmpeg/ffprobe on every GitHub Actions OS so the full media suite runs on Linux, macOS and Windows rather than relying on preinstalled tools. Video fixtures canonicalize temporary paths and explicitly encode HDR bitstream transfer tags for newer FFmpeg builds.

@@ -1,6 +1,6 @@
 # JSON contract (1.0)
 
-The CLI and Python service run without a web server. [JSON Schema](../schemas/results-v1.schema.json) uses Draft 2020-12 and covers result envelopes, metadata/technical/semantic stages, duplicate pages, scene pages and semantic search. Extractor tags/provenance allow documented extension fields. Result schema version is independent of package version, database user_version and algorithm version. The 0.3 package extends v1 additively with semantic stages/search; consumers should tolerate documented additions.
+The CLI and Python service run without a web server. [Packaged JSON Schema](../src/storylens/schemas/results-v1.schema.json) uses Draft 2020-12 for core result envelopes, metadata/technical/semantic/audio/transcript stages, duplicate pages, scene pages and semantic search. Extractor tags/provenance allow documented extension fields. Result schema version is independent of package version, catalog/job database user_version and algorithm version. M5 adds separate durable-job and bounded MCP envelope schemas, available through SDK resources below.
 
 | Result | Fields |
 | --- | --- |
@@ -14,7 +14,7 @@ The CLI and Python service run without a web server. [JSON Schema](../schemas/re
 
 ## Identity, paths and stages
 
-List items contain id (sha256:<digest>), kind, size and first_seen UTC timestamp. Export/show include paths, analysis keyed by metadata/image_technical/video_technical/semantic_embeddings/semantic_vision, and last failures. Path observations retain path/media_id, size, mtime_ns/ctime_ns, optional-valued birthtime and last_seen UTC. Stored references are not availability or unchanged-content guarantees.
+List items contain id (sha256:<digest>), kind, size and first_seen UTC timestamp. Export/show include paths, analysis keyed by metadata/image_technical/video_technical/audio_technical/semantic_embeddings/semantic_vision/audio_transcription/transcript, and last failures. Path observations retain path/media_id, size, mtime_ns/ctime_ns, optional-valued birthtime and last_seen UTC. Stored references are not availability or unchanged-content guarantees.
 
 Each successful stage contains cache_key, analyzed_at and result. Keys include the applicable algorithm/tool/model/parameters; media ID and stage are separate database key components. Successful results are cached independently. A failed forced rerun can leave a previous successful result alongside a newer failure; inspect both. Summary analyzed/failed file counts can overlap when different stages on the same file succeed/fail. Per-stage counts report analyzed/cache_hits/failed exactly. Cache hits count files only when every selected applicable stage is cached.
 
@@ -45,4 +45,22 @@ with Analyzer(Config(Path("/absolute/local/catalog.sqlite3"))) as app:
     videos = app.catalog.page(limit=25, media_kind="video")
 ~~~
 
-Use stage="metadata"/"technical" to select inference-free subsets; use depth="fast"/"standard"/"deep" with all or semantic to opt into semantics. stage="semantic" defaults to standard and includes the applicable video technical prerequisite. app.search(text="beach", depth="fast", limit=20) or app.search(image=Path("reference.jpg"), depth="fast") requires Config.embedding_model. Configure Config.vision_model/ollama_endpoint for standard/deep captions. force=True recomputes selected stages. Service/catalog objects do not always add CLI envelopes; internal Python APIs may evolve across minor releases. Providers are concrete task-specific classes, not a dynamic plugin marketplace. No plugin ABI, HTTP endpoint or MCP server is promised yet.
+Use stage="metadata"/"technical" for inference-free subsets; use depth="fast"/"standard"/"deep" with all/semantic to opt into semantics. stage="semantic" defaults to standard and includes the video technical prerequisite. Local transcription uses stage="transcript" and configured audio_transcription_model. app.import_transcript(media_id, path, format=None, offset=0, language=None) stores supplied evidence; app.transcript(media_id, format="json"/"srt"/"vtt") exports it. force=True recomputes selected stages. No plugin ABI or HTTP endpoint is provided.
+
+## Durable jobs (M5)
+
+`storylens.jobs.JobManager(config, roots)` supplies start(path, analyze=True, stage="all", depth=None, force=False), status(id), cancel(id), resume(id), result(id) and list(limit=50, after=""). CLI `job` and MCP call the same manager. Roots are explicit existing media directories, not a tool-call override. State lives in a local catalog-adjacent `.jobs.sqlite3` database.
+
+Job objects include schema_version="1.0", id, root, request, status, progress counters, summary/error, attempt and UTC created/updated/started/finished/heartbeat timestamps. Jobs have queued/running/cancel_requested/succeeded/failed/cancelled/interrupted states. result returns the same durable state envelope and bounded partial/final summary; media details are queried separately through catalog pages. One running job per catalog; queued workers wait without FIFO guarantees. Lease heartbeats are every 2 seconds; a missing worker becomes interrupted after its 30-second lease expires and the next job interaction observes it. Resume is explicit and increments attempt; fencing prevents an old owner publishing catalog writes after takeover.
+
+Cancellation is persisted and checked at file/stage and catalog commit boundaries. Transport disconnection is not cancellation. Current model/decoder/hash work may finish first; no universal local-model wall-clock bound is promised. Successful stages survive cancellation/interruption; resume reuses them even after an originally forced submission.
+
+## MCP stdio envelopes (M5)
+
+Install the optional mcp extra, then use `serve --allow-root DIR` with trusted startup configuration. Tools are list_media, show_media, export_media, scenes, search, duplicates, import_transcript, export_transcript, start_job, job_status, cancel_job, resume_job, job_result and list_jobs. Call errors set MCP isError; invalid typed arguments are not successful empty results. The SDK publishes typed input schemas; it does not grant filesystem permission.
+
+MCP record pages default to50 (search20), max100. show/export omit large scenes, semantic items and transcript segments with explicit counts/omission flags. Arbitrary stored metadata has a bounded response budget, individual text max16384 characters, and truncated_fields disclosure. These transport summaries are not lossless copies of full core stage payloads. Scene pages and source evidence preserve available absolute source timing; artifact paths outside approved roots are redacted.
+
+export_transcript returns lossless serialized JSON/SRT/VTT character pages: text, total_characters and next_cursor. Concatenate text until next_cursor is null; keep format and stored transcript unchanged. Default page8192, maximum16384 characters. No arbitrary output-file writes are exposed.
+
+Read SDK resources `storylens://schemas/results-v1` (installed core results), `storylens://schemas/jobs-v1` (durable state) and `storylens://schemas/mcp-v1` (bounded transport envelopes). The core schema ships inside the wheel, independent of checkout cwd. CLI/core schemas retain their distinct contracts.

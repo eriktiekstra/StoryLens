@@ -2,7 +2,7 @@
 
 ## Development
 
-Use Python 3.11+, create a virtual environment, and run `python -m pip install -e .`. Install FFmpeg/ffprobe from a trusted OS source for integration tests. Run `python -m unittest discover -s tests -v`. No private media, model download, GPU, paid account or cloud access is needed. Generate fixtures in temporary directories; contribute only legally redistributable assets if generation cannot cover a case. Do not commit catalogs, private GPS/transcripts or credentials.
+Use Python3.11+, create a virtual environment and run `python -m pip install -e ".[mcp]"` for the full integration suite (or install the base package for core-only work). Install trusted FFmpeg/ffprobe. Run `python -m unittest discover -s tests -v`. No private media, model download, GPU, paid account or cloud access is needed. Generate fixtures in temporary directories; contribute only legally redistributable assets. Do not commit catalogs, private GPS/transcripts or credentials.
 
 For real semantic verification, install the optional semantic extra and stage trusted local weights deliberately. No test-suite model acquisition is allowed. Run a CPU offline encoder and a loopback cloud-disabled Ollama smoke separately from deterministic tests; record model/runtime digests, retrieval relevance judgments and hallucinations rather than claiming broad accuracy.
 
@@ -16,7 +16,7 @@ A stage change must update its own algorithm revision and relevant parameter/mod
 
 Describe the behavior, privacy/data flow, cache impact, dependency/model licenses and actual verification. Add deterministic tests for consumer-visible boundaries and failures. Mock cloud HTTP when providers exist; never require paid access. Use an actual CLI/media smoke in addition to tests, and record limits instead of claiming untested OS/GPU/codec support. Do not check in personal family media for reproduction.
 
-The Linux suite covers content replacement, cache versions/force/moves/restart, source immutability, configuration, pagination, corrupt media, missing tools/timeouts/storage errors, technical measurements/duplicates, VFR/source-origin/rotation timing, artifact recovery and cancellation. Semantic coverage adds independent model cache invalidation, depth/evidence selection, same-space ranking/dimension errors, mutation rejection and local-provider privacy/HTTP failures. FFmpeg integration skips explicitly when unavailable; semantic unit tests use isolated fixtures/loopback servers without model weights. Real disk exhaustion, forced termination, NAS/GPU performance, MCP and cloud adapters are not established coverage. See security reporting for sensitive issues.
+The suite covers identity/cache/error/technical/semantic/audio behavior and real official-SDK stdio calls, detached submitter exit, queue continuation, cancellation, expired-lease recovery, stale-owner write fencing and authorized catalog filtering. GitHub Actions installs FFmpeg and the MCP extra on Linux/macOS/Windows for Python3.11/3.12. Base installs remain usable without MCP; MCP tests skip explicitly if that optional extra is absent. Real disk exhaustion, multi-host NAS scheduling, universal GPU performance and cloud/editor adapters remain unverified.
 
 ## Licensing
 

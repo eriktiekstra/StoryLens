@@ -2,9 +2,9 @@
 
 Local-first, editor-independent media intelligence. MIT licensed; free to self-host.
 
-**Current package: 0.3.0 — M1 foundation, M2 technical analysis and M3 local semantics.** StoryLens indexes referenced media, preserves metadata, measures image quality, finds duplicate candidates and extracts timestamped video scenes. Opt-in CLIP/SigLIP embeddings enable text/image retrieval; an installed local Ollama vision model describes selected frames. No automatic model downloads, cloud fallback, telemetry, subscriptions or accounts. Default analysis remains inference-free.
+**Current package: 0.5.0 — M1–M5: indexing, technical analysis, local semantics, audio/transcripts and an agent API.** StoryLens indexes referenced media, preserves metadata, measures image/audio signals, finds duplicate candidates and extracts timestamped video scenes. Opt-in local models provide image/text retrieval, captions and transcription. Durable local jobs and an optional MCP stdio server share the same service as the CLI. No automatic model downloads, cloud fallback, telemetry, subscriptions or accounts. Default analysis remains inference-free.
 
-Transcription, MCP, event grouping, feedback and storyboards remain **planned, not implemented**. See [architecture](ARCHITECTURE.md), [milestones](docs/IMPLEMENTATION_PLAN.md), and primary-source research for [components](docs/research/media-ecosystem.md), [existing applications](docs/research/existing-applications.md), and [FilmCraft/MCP](docs/research/filmcraft-mcp.md).
+Event grouping, feedback and storyboards remain **planned, not implemented**. See [architecture](ARCHITECTURE.md), [milestones](docs/IMPLEMENTATION_PLAN.md), and primary-source research for [components](docs/research/media-ecosystem.md), [existing applications](docs/research/existing-applications.md), and [FilmCraft/MCP](docs/research/filmcraft-mcp.md).
 
 ## Installation
 
@@ -38,7 +38,7 @@ storylens --json scenes 'sha256:VIDEO_ID' --limit 20
 storylens export --limit 50 > analysis-page.json
 ~~~
 
-Use --database /absolute/local/catalog.sqlite3 consistently when overriding the platform default. Source files are referenced and read, never copied or edited. analyze runs metadata plus applicable image/video technical stages; analyze PATH --stage metadata retains metadata-only processing. --stage technical runs only applicable image/video technical stages. Standalone audio currently receives metadata, not transcription or technical audio analysis; video technical results include measurements from its first audio stream.
+Use --database /absolute/local/catalog.sqlite3 consistently when overriding the platform default. Source files are referenced and read, never copied or edited. analyze runs metadata plus applicable image/video/audio technical stages; analyze PATH --stage metadata retains metadata-only processing. Audio transcription is opt-in via an installed local model and --stage transcript; timestamped JSON/SRT/VTT imports work without models.
 
 Rerun after interruption: completed stages remain cached. --force recomputes only selected stages. Same bytes at a new path reuse analysis. Default scans hash every file, including repeat scans; --trust-stat reduces NAS reads but may miss changes preserving size/mtime. --no-trust-stat overrides a configured stat-trust setting.
 
@@ -64,11 +64,11 @@ FAST embeds one representative scene; STANDARD embeds/describes up to eight unif
 ## Reference
 
 - [CLI, configuration, media formats, privacy and NAS operation](docs/USAGE.md)
-- [JSON contract](docs/API.md) and [JSON Schema](schemas/results-v1.schema.json)
+- [JSON contract](docs/API.md) and [packaged JSON Schema](src/storylens/schemas/results-v1.schema.json)
 - [AI/provider, MCP-host and optional FilmCraft boundaries](docs/INTEGRATIONS.md)
 - [Security](SECURITY.md), [contributing](CONTRIBUTING.md), [changelog](CHANGELOG.md)
 
-There is no HTTP API or MCP launch command yet. The importable service is storylens.service.Analyzer with storylens.config.Config; internal Python interfaces may evolve across minor releases.
+No HTTP listener or editor dependency is introduced. `storylens serve --allow-root /mounted/media` runs the optional local MCP stdio transport; [host setup](docs/INTEGRATIONS.md#mcp-setup-for-codex-and-claude-code) requires a trusted executable, local catalog and explicit approved roots.
 
 ## Development and verification
 
@@ -76,6 +76,6 @@ There is no HTTP API or MCP launch command yet. The importable service is storyl
 python -m unittest discover -s tests -v
 ~~~
 
-The deterministic Linux suite covers metadata/technical behavior plus semantic cache isolation, depth/evidence coverage, same-space ranking, model mutation, metadata-free frame transmission and loopback/cloud/HTTP failure boundaries. CPU SigLIP image/text inference was exercised with socket connections denied; see [integration evidence](docs/INTEGRATIONS.md#verification-and-limits) for model revisions and quality limits.
+The suite covers metadata/technical/audio behavior, semantic cache/evidence/ranking/privacy boundaries, durable job restart/cancellation/lease fencing and real official-SDK MCP subprocess calls. CPU SigLIP inference and installed local faster-whisper transcription have separate real-model evidence; see [integration evidence](docs/INTEGRATIONS.md#verification-and-limits) for revisions and quality limits.
 
-Windows/macOS execution, NAS throughput, full RAW support, HDR fidelity, broad semantic accuracy and FilmCraft runtime interoperability are not yet verified. Platform CI is configured, not evidence of an observed cross-platform run.
+Linux/macOS/Windows core/media checks passed across Python 3.11/3.12 in GitHub Actions. M5 is verified with 159 combined Linux tests and installed-wheel core/MCP smokes. This is not proof of NAS throughput, universal GPU/codec support, full RAW support, HDR fidelity, broad semantic accuracy or FilmCraft interoperability.

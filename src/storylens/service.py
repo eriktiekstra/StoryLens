@@ -60,7 +60,7 @@ class Analyzer:
         return all(Path(scene["representative_frame"]["path"]).is_file()
                    for scene in result["scenes"])
 
-    def scan(self, root: Path, *, analyze=False, force=False, stage="all", depth=None):
+    def scan(self, root: Path, *, analyze=False, force=False, stage="all", depth=None, checkpoint=None):
         if stage not in {"metadata", "technical", "semantic", "transcript", "all"}:
             raise ValueError("stage must be metadata, technical, semantic, transcript or all")
         if stage == "transcript" and not self.config.audio_transcription_model:
@@ -84,7 +84,11 @@ class Analyzer:
             else:
                 summary["errors_truncated"] = True
 
+        if checkpoint is not None:
+            checkpoint(summary)
         for entry in discover(root, self.config.exclusions):
+            if checkpoint is not None:
+                checkpoint(summary)
             if isinstance(entry, OSError):
                 summary["failed"] += 1
                 failure(getattr(entry, "filename", root), entry, "ingestion")
@@ -99,6 +103,8 @@ class Analyzer:
                     media_id = known["media_id"]
                 else:
                     media_id = fingerprint(entry, before)
+                if checkpoint is not None:
+                    checkpoint(summary)
                 self.catalog.observe(media_id, entry, kind(entry), before)
             except (OSError, ValueError) as error:
                 summary["failed"] += 1
@@ -123,6 +129,8 @@ class Analyzer:
             file_failed, computed, hits = False, False, 0
             failed_stages = set()
             for stage_name, extractor in selected:
+                if checkpoint is not None:
+                    checkpoint(summary)
                 counts = summary["stages"].setdefault(stage_name, {"analyzed": 0, "cache_hits": 0, "failed": 0})
                 try:
                     if stage_name.startswith("semantic_"):
@@ -168,18 +176,26 @@ class Analyzer:
                         raise ValueError("Source changed during " + stage_name)
                 except (OSError, ValueError, TypeError, SyntaxError, EOFError, RuntimeError, Warning) as error:
                     failed_stages.add(stage_name)
+                    if checkpoint is not None:
+                        checkpoint(summary)
                     self.catalog.fail(media_id, stage_name, str(error)[:2000])
                     counts["failed"] += 1
                     file_failed = True
                     failure(entry, error, stage_name)
                     continue
                 # Storage failures escape rather than being mistaken for bad media.
+                if checkpoint is not None:
+                    checkpoint(summary)
                 self.catalog.save(media_id, stage_name, key, result)
                 counts["analyzed"] += 1
                 computed = True
+                if checkpoint is not None:
+                    checkpoint(summary)
             summary["failed"] += int(file_failed)
             summary["analyzed"] += int(computed)
             summary["cache_hits"] += int(bool(selected) and hits == len(selected))
+        if checkpoint is not None:
+            checkpoint(summary)
         return summary
 
     @staticmethod

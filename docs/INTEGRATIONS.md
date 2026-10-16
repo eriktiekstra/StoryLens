@@ -2,7 +2,7 @@
 
 ## What is executable today
 
-M1–M3 provide local indexing, technical analysis, opt-in CLIP/SigLIP retrieval and Ollama frame descriptions. Transcription, MCP, an HTTP server, storyboards and editor adapters remain unimplemented. No cloud credentials or automatic model downloads exist. The inference-free profile remains [examples/local.toml](../examples/local.toml).
+M1–M5 provide local indexing, technical/audio analysis, timestamped transcript import/export, opt-in CLIP/SigLIP retrieval/Ollama frame descriptions, local transcription, durable jobs and optional MCP stdio. HTTP, events/feedback, storyboards and editor adapters remain unimplemented. No cloud credentials or automatic model downloads exist. The inference-free profile remains [examples/local.toml](../examples/local.toml).
 
 ## Local AI setup (M3)
 
@@ -29,7 +29,13 @@ Linux CPU inference was exercised with official `google/siglip-base-patch16-224`
 
 An installed-CLI smoke analyzed three generated color images and a two-scene video, validated summary/export/search JSON against the schema, retrieved relevant color evidence for three text queries, matched a reference image to itself, and retained captions for scene representatives at source times 0.6 and 1.6 seconds. A final STANDARD rerun reused all four files' embeddings/captions and the video technical stage; source hashes stayed unchanged. Changing actual encoder-config content recomputed embeddings only and excluded old-space search rows. These small synthetic checks do not measure family-media relevance or caption truthfulness.
 
-These are correctness checks, not a broad accuracy benchmark or throughput claim. Moondream invented a white border on a plain red fixture; captions remain `model_hypothesis` with null confidence, and must not drive factual identity/event conclusions. The short caption instruction was verified on that model; empty/malformed model output remains an error. CLIP runtime execution, accelerator performance, multilingual retrieval, diverse family-media quality and Windows/macOS inference have not been established here. Transcript import/transcription remain M4.
+These are correctness checks, not a broad accuracy benchmark or throughput claim. Moondream invented a white border on a plain red fixture; captions remain model_hypothesis with null confidence and must not drive factual identity/event conclusions. CLIP runtime execution, accelerator performance, multilingual retrieval and broad family-media accuracy are not established. Timestamped transcript import and optional local faster-whisper transcription are implemented independently of the semantic image stages.
+
+## Local audio and transcript setup (M4)
+
+Transcript import accepts existing JSON/SRT/VTT without model packages. For transcription install trusted `faster-whisper` and stage a complete local model directory, including weights, config and tokenizer.json. Set audio_transcription_model (or --audio-transcription-model), audio_transcription_device=cpu/cuda, optional audio_transcription_language, and select --stage transcript. Inference is an offline-configured isolated worker; missing libraries/assets/devices fail explicitly, with no model download or GPU fallback. Python audit hooks are not a native-code/kernel network sandbox.
+
+The direct Python AudioModelExtractor also supports diarization (pyannote.audio/Torch/torchaudio/PyYAML with entirely local model references) and sound classification (Transformers/Torch with complete local assets). They are not separate CLI stage selectors. Anonymous speaker clusters are result-local, overlaps are preserved, and sound scores are uncalibrated. Pretrained diarization/sound inference was not exercised. [Pinned audio model/runtime evidence](research/media-ecosystem.md) records the actual CPU faster-whisper smoke and limitations.
 
 ## Optional cloud setup plan
 
@@ -37,11 +43,27 @@ Future OpenAI, Anthropic, Gemini, OpenRouter and OpenAI-compatible adapters must
 
 ## MCP setup for Codex and Claude Code
 
-**StoryLens MCP cannot be registered yet:** there is intentionally no `storylens mcp` command. M5 will implement stdio through the maintained official Python SDK, durable application jobs, cancellation/status/result pages, schemas and path authorization. The researched current SDK is v2 with MCPServer; do not copy obsolete FastMCP/experimental Tasks examples. [MCP research](research/filmcraft-mcp.md) records exact versions and sources. No MCP protocol tests are claimed for the current release.
+Install `python -m pip install -e ".[mcp]"` (official SDK `mcp>=2.3,<3`). Register the trusted installed executable, a local catalog and explicit approved media directories. Use a non-inference config unless local model inference is deliberately authorized. MCP tools cannot change the startup config, model paths or roots. No HTTP listener, cloud upload or experimental protocol Tasks engine is involved.
 
-For now Codex or Claude Code can invoke the installed CLI with `--json` under normal shell permissions. Restrict media roots and outputs in the agent host, review disclosure of private paths/content, and do not hand untrusted agents unrestricted home-directory access. An application that performs no uploads cannot prevent a separate agent from forwarding its JSON elsewhere.
+Codex `~/.codex/config.toml` or trusted-project `.codex/config.toml`:
 
-Once M5 ships, document and test the exact release executable and its stdio server with both hosts: Codex's `mcp_servers` TOML configuration and Claude Code's `mcpServers` JSON configuration. The host must point at a trusted absolute executable, local catalog and explicit allowed media roots; stdout must contain only MCP traffic. Do not publish a registration snippet pointing at a nonexistent server.
+~~~toml
+[mcp_servers.storylens]
+command = "/absolute/venv/bin/storylens"
+args = ["--database", "/absolute/local/catalog.sqlite3", "serve", "--allow-root", "/absolute/media"]
+~~~
+
+Claude Code project `.mcp.json`:
+
+~~~json
+{"mcpServers":{"storylens":{"type":"stdio","command":"/absolute/venv/bin/storylens","args":["--database","/absolute/local/catalog.sqlite3","serve","--allow-root","/absolute/media"]}}}
+~~~
+
+Windows uses the trusted venv Scripts/storylens.exe executable and absolute Windows paths (escape backslashes in JSON). Add repeated `--allow-root` arguments for additional directories. Never point a host at an auto-downloading `pip`/model acquisition command or give it an unrestricted home-directory root. Restrict inherited environment and review disclosure of private content; StoryLens cannot prevent the agent host forwarding returned data elsewhere.
+
+Fourteen tools provide authorized queries, supplied transcript import/paged export and durable start/status/cancel/resume/result/list. Server disconnect leaves jobs running; cancel_job records a separate cancellation request. Scenes/transcript content use dedicated pages; show/export disclose omissions and arbitrary metadata is bounded. [API/schema contracts](API.md#mcp-stdio-envelopes-m5) document cursors and limits.
+
+Verification used the official 2.3.0 ClientSession/stdio_client against actual subprocesses, including handshake, jobs across reconnect, schema resources, CLI parity and unauthorized/malformed input. The same smoke passed from the installed wheel outside source-package imports. Codex/Claude configuration follows their official docs, but those host applications were not launched here; [primary sources](research/filmcraft-mcp.md#m5-implementation-evidence-addendum--2026-10-16).
 
 ## Verified FilmCraft boundary
 

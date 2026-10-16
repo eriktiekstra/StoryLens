@@ -234,3 +234,74 @@ MCP / official Python SDK, accessed on the research date:
 - **M9** — [2026-07-28 pagination specification](https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/pagination); [SDK pagination defaults and low-level customization](https://py.sdk.modelcontextprotocol.io/advanced/pagination/index.md).
 - **M10** — [2026-07-28 tools, JSON Schema, structured results and security](https://modelcontextprotocol.io/specification/2026-07-28/server/tools); [base protocol and modern metadata](https://modelcontextprotocol.io/specification/2026-07-28/basic/index).
 - **M11** — [Official local server security guidance and stdio trust model](https://modelcontextprotocol.io/docs/2026-07-28/tutorials/security/local-server-security).
+
+## M5 implementation evidence addendum — 2026-10-16
+
+Primary-source review only; no server, client, build or test was run for this addendum. Earlier research is preserved above. **Correction:** both current **mcp 2.3.0** and maintenance **mcp 1.30.0** declare **Python >=3.10**, superseding the earlier Python 3.11+ statement. Sources: [current PyPI metadata](https://pypi.org/pypi/mcp/json), [v1.30.0 metadata](https://pypi.org/pypi/mcp/1.30.0/json), and [v2.3.0 pyproject](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/pyproject.toml).
+
+### Dependency and high-level APIs
+
+**Recommendation / [INFERENCE]:** use optional dependency **`mcp>=2.3,<3`**, without the CLI extra, for new StoryLens code. The official SDK's FastMCP API is the **v1 maintenance line**, not the current stable interface; do not confuse it with the separately distributed fastmcp package. The [official v1 README](https://github.com/modelcontextprotocol/python-sdk/blob/v1.x/README.md) identifies v2 as stable and promises v1 critical/security fixes. If deliberately targeting FastMCP, use **mcp>=1.30,<2** instead.
+
+| Surface | Maintained v1 FastMCP | Current v2.3.0 |
+| --- | --- | --- |
+| Server import | `from mcp.server.fastmcp import FastMCP` | `from mcp.server import MCPServer` |
+| Construction | `FastMCP("StoryLens")` | `MCPServer("StoryLens")` |
+| Tool registration | `@server.tool()` | Same decorator; optional `structured_output=False` |
+| Explicit result | `CallToolResult(content=[TextContent(type="text", text=message)], isError=True)` | Use `is_error=True` and `structured_content=payload` |
+| Resource registration | `@server.resource(uri, mime_type="application/json")` | Same |
+| Stdio entry point | `server.run(transport="stdio")` | Same synchronous entry point |
+| Async entry point | `await server.run_stdio_async()` | Same |
+
+Both result classes import from `mcp.types`. Returning a `CallToolResult` directly preserves application control of content and the tool-error flag; a domain failure should not be disguised as successful text. `ToolError` and ordinary handler exceptions are converted to tool-error results by the high-level server. URI `{job_id}` placeholders register resource templates and become handler arguments. For JSON resources, return serialized JSON text (`str`); binary resources return `bytes`. Sources: [v1 tools/errors/resources documentation](https://github.com/modelcontextprotocol/python-sdk/blob/v1.x/docs/server.md), [v1 server signatures](https://github.com/modelcontextprotocol/python-sdk/blob/v1.x/src/mcp/server/fastmcp/server.py), [v2.3.0 server signatures/error handling](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/src/mcp/server/mcpserver/server.py).
+
+V2 removes the `mcp.server.fastmcp` import path and uses snake_case Python attributes, including `is_error`, `structured_content`, `input_schema`, `resource_templates` and `mime_type`. MCP wire aliases remain camelCase; use `model_dump(by_alias=True)` for explicit protocol serialization. Synchronous v2 handlers run on worker threads and may execute concurrently; `async def` handlers remain on the event loop. Source: [tagged migration guide](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/docs/migration.md).
+
+### Official ClientSession/stdio integration
+
+Explicit transport/session integration remains available in v2; a hand-written JSON-RPC client is unnecessary:
+
+```python
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+# Inside an async function; executable, arguments and URI come from the caller.
+params = StdioServerParameters(command=executable, args=server_args)
+async with stdio_client(params) as (read, write):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        tools = await session.list_tools()
+        resources = await session.list_resources()
+        templates = await session.list_resource_templates()
+        result = await session.call_tool(tool_name, arguments)
+        # V2 attributes: result.is_error, result.structured_content
+        resource = await session.read_resource(resource_uri_string)
+```
+
+`StdioServerParameters` accepts command, args, env and cwd. `stdio_client(params, errlog=sys.stderr)` spawns the subprocess and yields the read/write pair; the context manager owns shutdown. Explicit env entries merge over a minimal inherited allow-list, not the whole parent environment. V2's simpler high-level alternative is `async with Client(params) as client`, which initializes automatically. Sources: [official nested-client example](https://github.com/modelcontextprotocol/python-sdk/blob/v1.x/docs/client.md), [v2 exports](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/src/mcp/__init__.py), [v2 stdio transport](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/src/mcp/client/stdio.py), [v2 session signatures](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/src/mcp/client/session.py), [official transport guide](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/docs/client/transports.md).
+
+### Official Codex and Claude Code stdio configuration
+
+The following **proposed StoryLens examples / [INFERENCE]** adapt the official host syntax to the agreed CLI. Replace absolute paths with trusted installed locations; these commands were not executed.
+
+**Codex:** configuration lives in `~/.codex/config.toml` or trusted-project `.codex/config.toml`. Each server uses a `[mcp_servers.NAME]` table with required command and optional args, cwd, env and env_vars. CLI equivalent: `codex mcp add storylens -- /absolute/path/to/storylens serve --allow-root /absolute/path/to/media`. Source: [OpenAI Codex MCP docs](https://developers.openai.com/codex/mcp).
+
+```toml
+[mcp_servers.storylens]
+command = "/absolute/path/to/storylens"
+args = ["serve", "--allow-root", "/absolute/path/to/media"]
+```
+
+**Claude Code:** `claude mcp add --transport stdio --scope project storylens -- /absolute/path/to/storylens serve --allow-root /absolute/path/to/media`. The `--` separator ends host options. Project scope writes `.mcp.json`; default local scope and user scope use `~/.claude.json` with different visibility. Source: [Anthropic Claude Code MCP docs: local stdio and configuration scopes](https://code.claude.com/docs/en/mcp).
+
+```json
+{
+  "mcpServers": {
+    "storylens": {
+      "type": "stdio",
+      "command": "/absolute/path/to/storylens",
+      "args": ["serve", "--allow-root", "/absolute/path/to/media"]
+    }
+  }
+}
+```

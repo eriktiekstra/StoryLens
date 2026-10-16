@@ -1,10 +1,10 @@
 # StoryLens architecture
 
-Status: M1 foundation, M2 technical analysis and M3 local semantics implemented; audio/agent/event/storyboard capabilities remain planned.
+Status: M1–M5 implemented: foundation, technical analysis, local semantics, audio/transcripts and durable agent API. Events, feedback and storyboards remain planned.
 
 ## Scope and decisions
 
-StoryLens is an editor-independent, local-first media intelligence library with a thin CLI and, later, MCP adapters. It is not an editor or an autonomous agent. Working milestones M1–M3 cover ingestion, metadata, technical measurements, duplicates, timestamped scenes, same-space retrieval and selected-frame vision hypotheses; remaining product requirements stay in the roadmap.
+StoryLens is an editor-independent, local-first media intelligence library with thin CLI and optional MCP transports. It is not an editor or an autonomous agent. Working milestones M1–M5 cover ingestion, metadata, technical measurements, duplicates, timestamped scenes, local semantics, audio/transcripts and durable jobs; events/feedback/storyboard requirements remain in the roadmap.
 
 Use Python 3.11+, SQLite from the standard library, Pillow/NumPy for image metadata and bounded technical measurements, and external ffprobe/FFmpeg for audio/video metadata and technical processing. Python has mature bindings to native media and ML libraries. Rust offers strong resource control but would require a second ML runtime or service. TypeScript is attractive for MCP but a weaker fit for local ML. A hybrid adds packaging, IPC and versioning costs before a measured bottleneck exists. Profile before adding another language.
 
@@ -19,7 +19,7 @@ No server, queue broker, vector database, Docker requirement, model download or 
 - **Service**: orchestrates ingestion and metadata without depending on argparse, MCP, editors, or a cloud provider.
 - **Technical stages**: image_technical (bounded, orientation-aware proxies and similarity features) and video_technical (source-PTS cuts, derived JPEGs, sampled frame proxies and first-stream audio statistics), independently cached from metadata.
 - **Semantic providers/stages**: optional local CPU Transformers CLIP/SigLIP image/text encoders and an explicitly loopback, cloud-disabled Ollama vision daemon. Embedding and caption stages cache independently from each other and from technical results. Search performs exact cosine ranking only within one model/content/library/preprocessing space and depth.
-- **CLI**: synchronous commands with JSON output and explicit partial-failure exit status. M1 is not a claim of asynchronous MCP support.
+- **CLI/MCP**: synchronous CLI commands plus durable job controls; the optional stdio SDK transport calls the same services and adds explicit approved-root authorization and bounded envelopes.
 
 Future modules depend inward on the service and storage contracts. Add concrete modules when needed, not a dynamic plugin marketplace.
 
@@ -53,7 +53,9 @@ Temporal/spatial/semantic grouping uses coarse events above scenes/activities wi
 
 ## MCP and jobs (M5)
 
-Use maintained official Python MCP SDK, stdio first. Tools call the same service as CLI. Start jobs quickly, return durable IDs; status/result pages and explicit cancellation never depend solely on transport lifetime. Persist checkpoints, stage failures, progress and cancellation state. Resume interrupted jobs deliberately. Use SDK progress and cancellation as transport signals, not durability. Version JSON result schemas; use bounded pages rather than full-library payloads. Add HTTP only when justified, with authentication, origin validation and path authorization. The current researched Python SDK is v2 (MCPServer); its removed experimental Tasks API must not be used as the job engine.
+The optional official Python MCP SDK 2.x (`mcp>=2.3,<3`, MCPServer) runs stdio only. Fourteen typed tools call the same Analyzer/JobManager services as CLI. Startup-approved media roots constrain paths and catalog queries; tool calls cannot alter roots or runtime configuration. Core result schemas ship inside the wheel and MCP exposes separate job/transport schemas, bounded pages and explicit omission markers. No HTTP transport or experimental SDK Tasks API is used.
+
+Jobs persist in a catalog-adjacent `.jobs.sqlite3` store (schema1), separate from catalog schema2. Detached processes survive transport exit; one job runs per catalog while queued workers wait (not FIFO). A 2-second heartbeat maintains a 30-second lease; expiry yields interrupted state on the next interaction and requires explicit resume. Cancellation is persisted and cooperative between files/stages/commits, not an immediate stop of model/native work. Resume increments attempt and reuses independently committed stage caches. Token/attempt/lease checks and a short jobs transaction held through catalog observe/save/fail commit fence stale worker writes. Partial media failures retain the summary and produce failed job status. Ambient provider credentials/telemetry exporters are not passed to detached workers.
 
 ## Security and operational limits
 

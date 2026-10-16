@@ -67,6 +67,23 @@ def parser():
     query.add_argument("--image", type=Path, help="Query image (not added to catalog)")
     search.add_argument("--depth", choices=("fast", "standard", "deep"), default="standard")
     search.add_argument("--limit", type=int, default=20, help="Top media matches, 1..500")
+    serve = commands.add_parser("serve", help="Run the optional MCP stdio server")
+    serve.add_argument("--allow-root", action="append", required=True, type=Path,
+                       help="Approved media directory; repeat for multiple roots")
+    job = commands.add_parser("job", help="Submit and manage durable local analysis jobs")
+    job.add_argument("--allow-root", action="append", required=True, type=Path)
+    actions = job.add_subparsers(dest="action", required=True)
+    start = actions.add_parser("start", help="Return a durable ID; work outlives this command")
+    start.add_argument("path", type=Path)
+    start.add_argument("--scan", action="store_true", help="Index only, without analysis")
+    start.add_argument("--force", action="store_true")
+    start.add_argument("--stage", choices=("metadata", "technical", "semantic", "transcript", "all"), default="all")
+    start.add_argument("--depth", choices=("fast", "standard", "deep"))
+    for action in ("status", "cancel", "resume", "result"):
+        actions.add_parser(action).add_argument("job_id")
+    jobs = actions.add_parser("list")
+    jobs.add_argument("--limit", type=int, default=50)
+    jobs.add_argument("--after", default="")
     return cli
 
 
@@ -98,6 +115,25 @@ def main(argv=None):
                              ollama_endpoint=args.ollama_endpoint, semantic_timeout=args.semantic_timeout,
                              max_audio_seconds=args.max_audio_seconds, audio_transcription_model=args.audio_transcription_model,
                              audio_transcription_device=args.audio_transcription_device, audio_transcription_language=args.audio_transcription_language)
+        if args.command == "serve":
+            try:
+                from .mcp_server import main as serve
+            except ImportError as error:
+                raise RuntimeError('Install the MCP extra: pip install "storylens[mcp]"') from error
+            serve(config, args.allow_root)
+            return 0
+        if args.command == "job":
+            from .jobs import JobManager
+            manager = JobManager(config, args.allow_root)
+            if args.action == "start":
+                result = manager.start(args.path, analyze=not args.scan, stage=args.stage,
+                                       depth=args.depth, force=args.force)
+            elif args.action == "list":
+                result = manager.list(limit=args.limit, after=args.after)
+            else:
+                result = getattr(manager, args.action)(args.job_id)
+            emit(result, True)
+            return 2 if result.get("status") == "failed" else 0
         with Analyzer(config) as storylens:
             if args.command in ("scan", "analyze"):
                 result = storylens.scan(args.path, analyze=args.command == "analyze", force=getattr(args, "force", False),
@@ -123,8 +159,8 @@ def main(argv=None):
                     result["items"] = [storylens.catalog.get(item["id"]) for item in result["items"]]
         emit(result, args.json or args.command == "export")
         return 2 if result.get("failed") else 0
-    except (OSError, ValueError, TypeError, RuntimeError, sqlite3.Error) as error:
-        if args.json:
+    except (OSError, ValueError, TypeError, RuntimeError, KeyError, sqlite3.Error) as error:
+        if args.json and args.command != "serve":
             print(json.dumps({"schema_version": "1.0", "error": str(error)}, ensure_ascii=True))
         else:
             print("error: " + str(error), file=sys.stderr)
