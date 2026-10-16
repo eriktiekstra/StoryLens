@@ -23,7 +23,7 @@ class VideoTechnicalTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.base = Path(self.temp.name)
+        self.base = Path(self.temp.name).resolve()
         self.output = self.base / "artifacts"
         self.extractor = VideoTechnicalExtractor()
 
@@ -162,9 +162,10 @@ class VideoTechnicalTests(unittest.TestCase):
     def test_hdr_preview_limitation_disclosed(self):
         source = self.base / "hdr.mp4"
         self.ffmpeg("-f", "lavfi", "-i", "color=white:s=80x48:r=10:d=1", "-c:v", "libx264",
+                    "-x264-params", "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc",
                     "-color_trc", "smpte2084", "-colorspace", "bt2020nc", "-color_primaries", "bt2020", source)
         result = self.extractor.extract(source, self.output)
-        self.assertTrue(result["derivatives"]["hdr_detected"])
+        self.assertTrue(result["derivatives"]["hdr_detected"], result["derivatives"])
         self.assert_artifacts(result)
 
     def test_scene_limit_fails_without_partial_success(self):

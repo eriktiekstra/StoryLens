@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Fixed audio-worker timeout, cancellation and output-limit cleanup on Windows; POSIX retains process-group termination.
-- Install and verify FFmpeg/ffprobe on every GitHub Actions OS so the full media suite runs on Linux, macOS and Windows rather than relying on preinstalled tools.
+- Install and verify FFmpeg/ffprobe on every GitHub Actions OS so the full media suite runs on Linux, macOS and Windows rather than relying on preinstalled tools. Video fixtures canonicalize temporary paths and explicitly encode HDR bitstream transfer tags for newer FFmpeg builds.
 
 ## 0.4.0 — 2026-10-15 (M4 audio/transcripts)
 
