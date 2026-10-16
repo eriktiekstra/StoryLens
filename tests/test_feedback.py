@@ -24,7 +24,7 @@ from storylens.video_analysis import VideoTechnicalExtractor
 
 class FeedbackTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
+        temporary = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(temporary.cleanup)
         self.base = Path(temporary.name).resolve()
         self.catalog_path = self.base / "catalog.sqlite3"
