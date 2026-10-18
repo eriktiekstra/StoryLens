@@ -1,5 +1,32 @@
 # Changelog
 
+Entries describe capabilities and verification at that release. Later milestones supersede earlier future-work lists; historical test counts and model smokes are not current verification guarantees.
+
+## 0.8.0 — 2026-10-18 (M8 optional FilmCraft interchange)
+
+- Added optional headless FilmCraft 0.9.0 discovery through the official MCP SDK: actual server identity, complete paginated tool schemas, command registry and document inspection. No editor installation/download or core dependency is introduced; failed requests close the session and ambiguous/oversized results fail explicitly.
+- Added `filmcraft create`, `preview`, `export` and saved-source `transcript` CLI actions with explicit approval and approved media roots. Creation revalidates current storyboard feedback, hashes actual selected sources, imports real editor IDs, verifies exact clip/source/frame timing and saves/reopens a new project before no-overwrite publication. Existing projects and source files are never saved in place.
+- Preserved absolute nonzero MP4 presentation timing where editor duration verifies the mapping; rejected negative/unknown/rebased origins, unsupported versions and off-grid cuts instead of guessing or silently snapping. Native project schema 15 transcript import requires an explicit item/catalog identity match, validates word bounds and preserves supplied source words/speaker labels without retranscription.
+- Added separate approved PNG preview and software H.264/AAC export to new files, with authorized project snapshots, online-media checks and offline-placeholder rejection. Per-operation reports retain partial outcomes; no automatic retry or transactional batch claim is made.
+- Exercised the checksum-verified official Linux release with MCP 2.3, generated image/audio/video sources, save/reopen, an 8-second/192-frame sequence, real previews and movie exports. A required-image/video fixture at 24000/1001 retained [5.5, 6.501) source timing and rendered 48 frames (2.002 seconds); AAC padding made container duration 2.005 seconds. Saved source transcript import retained [5, 6) timing.
+
+This is headless Linux/generated-media evidence, not private holiday-media/user acceptance, desktop bridge verification, cross-platform editor support or broad codec fidelity. M8's real holiday review remains pending; M9 release hardening remains open.
+
+Verification: all 284 tests passed with the optional MCP SDK installed. Every FilmCraft action also passed from the built 0.8.0 wheel outside checkout imports. A linked-picture/audio fixture exported an audible soundtrack; all six generated source hashes remained unchanged. Approval, overwrite, source-root output, off-grid timing, current transcript constraints and a real SDK initialization timeout were exercised explicitly. Importing the installed transport without the SDK worked and launch failed with an actionable extra-install error.
+
+## 0.7.0 — 2026-10-16 (M7 recommendations and portable storyboards)
+
+- Added deterministic recommendations over stored evidence with separate nullable technical/relevance scores, an explicit event/timing story heuristic, named `balanced`/`technical`/`story` strategies and custom normalized weights. Optional query text explicitly reuses configured local same-space retrieval; default recommendations remain inference-free.
+- Added hard duration budgets and merged request/feedback constraints: required/excluded media, mandatory include-segment unions, prohibited spans, absolute source bounds including negative/nonzero origins, and no duplicate images or overlapping selections. Conflicts, missing required sources and impossible budgets fail explicitly.
+- Preserved transcript-timed conversation blocks whole across overlapping cues and gaps up to two seconds. Mandated intervals expand to cover intersecting blocks; excluded-interrupted or oversized optional blocks are skipped, never silently trimmed. This is timing continuity, not semantic comprehension or emotional-value prediction.
+- Added editable portable storyboard JSON containing source IDs/times, holds, separate scores, rationale and caveats, without filesystem paths or transcript words. Strict validation checks edits against current source coverage and feedback; required/excluded corrections cannot be erased through document edits.
+- Added `storyboard` and `storyboard-check PATH` CLI commands, `Analyzer.recommend`/`validate_storyboard`, MCP `recommend_storyboard`/`validate_storyboard` (25 tools total), and packaged `storyboard-v1` schema/resource. MCP filters before scoring/grouping and preserves mixed-root manual-event fail-closed behavior.
+- Bounded generation to 100,000 candidates and output to 500 entries; extremely small clip targets fail before unbounded enumeration. MCP storyboards are complete documents or explicit 131,072-byte budget errors, never truncated edit plans.
+- Verified generated image/audio/video CLI behavior with a 5-second video origin, a 14-second storyboard, two-cue conversation preservation, exclusion enforcement, editable title/order, invalid timing/budget rejection and unchanged source hashes. Actual MCP 2.3 SDK subprocess smoke returned 111 lossless entries and rejected unauthorized roots, mixed-root manual events and oversized documents. Both smokes also passed from the built 0.7.0 wheel outside the checkout.
+- The final Linux suite passed all 259 tests with the optional MCP SDK installed and no skips, covering deterministic selection, required/excluded and source-time boundaries, conversation preservation, editable validation, feedback/source-move behavior and real stdio authorization.
+
+Selection uses deterministic greedy whole-candidate packing, not optimal editing or calibrated storytelling judgment. No new real-model query inference, M7 cross-platform runtime, rendering or FilmCraft integration was exercised; editor integration remains M8.
+
 ## 0.6.0 — 2026-10-16 (M6 events and durable corrections)
 
 - Added inference-free coarse event grouping from stored metadata, GPS and compatible normalized embeddings. Time is the primary join signal; embeddings may bridge a longer gap only within the same space, depth, algorithm, provider/model identity and dimension. Conservative defaults avoid over-fragmentation and enforce span/GPS bounds; explicit timezone ambiguity and undated review buckets are preserved.

@@ -104,6 +104,43 @@ def parser():
     edit.add_argument("--clear-all", action="store_true", help="Remove all user overrides for this identity")
     preferences = commands.add_parser("preferences", help="Read or patch collection grouping thresholds")
     preferences.add_argument("--set", dest="patch", type=json.loads, help="JSON preference patch")
+    storyboard = commands.add_parser("storyboard", help="Recommend a portable editable storyboard from stored evidence")
+    storyboard.add_argument("--duration", type=float, default=60, help="Hard total duration budget in seconds")
+    storyboard.add_argument("--strategy", choices=("balanced", "technical", "story"), default="balanced")
+    storyboard.add_argument("--weights", type=json.loads, help="JSON technical/relevance/story weights, overriding strategy weights")
+    storyboard.add_argument("--required", action="append", default=[], help="Required media ID; repeatable, merges with feedback")
+    storyboard.add_argument("--excluded", action="append", default=[], help="Excluded media ID; repeatable, merges with feedback")
+    storyboard.add_argument("--image-seconds", type=float, default=4, help="Image hold duration")
+    storyboard.add_argument("--clip-seconds", type=float, default=10, help="Target clip length; conversations remain whole")
+    storyboard.add_argument("--text", help="Opt into local same-space query inference for relevance scores")
+    storyboard.add_argument("--depth", choices=("fast", "standard", "deep"), default="standard")
+    check = commands.add_parser("storyboard-check", help="Validate edited storyboard JSON against current sources and corrections")
+    check.add_argument("path", type=Path)
+    editor = commands.add_parser("filmcraft", help="Optional verified FilmCraft discovery and approved interchange")
+    editor.add_argument("--executable", required=True, type=Path, help="Trusted absolute FilmCraft CLI path")
+    editor.add_argument("--request-timeout", type=float, default=300, help="Per-editor-request timeout")
+    actions = editor.add_subparsers(dest="action", required=True)
+    inspect = actions.add_parser("discover", help="Read actual server tools, commands and document without edits")
+    inspect.add_argument("--project", type=Path)
+    create = actions.add_parser("create", help="Assemble a reviewed storyboard into a new saved project")
+    create.add_argument("path", type=Path, help="Reviewed StoryLens storyboard JSON")
+    create.add_argument("--output", required=True, type=Path)
+    create.add_argument("--fps", default="24", help="Exact sequence frame rate, e.g. 24 or 24000/1001")
+    create.add_argument("--width", type=int, default=1920)
+    create.add_argument("--height", type=int, default=1080)
+    for name in ("preview", "export"):
+        action = actions.add_parser(name, help="Write a new preview PNG" if name == "preview" else "Write a new H.264 MP4")
+        action.add_argument("--project", required=True, type=Path)
+        action.add_argument("--output", required=True, type=Path)
+        if name == "preview":
+            action.add_argument("--seconds", required=True, type=float)
+    transcript = actions.add_parser("transcript", help="Import an explicitly mapped saved editor source transcript")
+    transcript.add_argument("--project", required=True, type=Path)
+    transcript.add_argument("--item-id", required=True, type=int)
+    transcript.add_argument("--media-id", required=True)
+    for action in (create, actions.choices["preview"], actions.choices["export"], transcript):
+        action.add_argument("--allow-root", action="append", required=True, type=Path)
+        action.add_argument("--approve", action="store_true", help="Approve the reviewed write/import; never overwrite")
     return cli
 
 
@@ -135,6 +172,33 @@ def main(argv=None):
                              ollama_endpoint=args.ollama_endpoint, semantic_timeout=args.semantic_timeout,
                              max_audio_seconds=args.max_audio_seconds, audio_transcription_model=args.audio_transcription_model,
                              audio_transcription_device=args.audio_transcription_device, audio_transcription_language=args.audio_transcription_language)
+        if args.command == "filmcraft":
+            import asyncio
+            from .filmcraft_transport import FilmCraft
+            from . import filmcraft
+
+            async def exchange():
+                if args.action == "discover":
+                    async with FilmCraft(args.executable, project=args.project,
+                                         timeout=args.request_timeout) as client:
+                        return await client.discover()
+                if args.action in {"preview", "export"}:
+                    return await filmcraft.render(executable=args.executable, project=args.project,
+                        output=args.output, roots=args.allow_root, approved=args.approve,
+                        seconds=getattr(args, "seconds", None), timeout=args.request_timeout)
+                with Analyzer(config) as app:
+                    if args.action == "transcript":
+                        filmcraft._approve(args.approve)
+                        return filmcraft.import_transcript(app, project=args.project, item_id=args.item_id,
+                            media_id=args.media_id, roots=args.allow_root)
+                    _, document = filmcraft._read_json(args.path)
+                    return await filmcraft.create(app, document, executable=args.executable, output=args.output,
+                        roots=args.allow_root, approved=args.approve, fps=args.fps, width=args.width,
+                        height=args.height, timeout=args.request_timeout)
+
+            result = asyncio.run(exchange())
+            emit(result, True)
+            return 2 if result.get("status") == "failed" else 0
         if args.command == "serve":
             try:
                 from .mcp_server import main as serve
@@ -183,6 +247,15 @@ def main(argv=None):
                     result = storylens.feedback(args.media_id)
             elif args.command == "preferences":
                 result = storylens.preferences() if args.patch is None else storylens.set_preferences(args.patch)
+            elif args.command == "storyboard":
+                result = storylens.recommend(duration_seconds=args.duration, strategy=args.strategy,
+                                             weights=args.weights, required=args.required, excluded=args.excluded,
+                                             image_seconds=args.image_seconds, clip_seconds=args.clip_seconds,
+                                             text=args.text, depth=args.depth)
+            elif args.command == "storyboard-check":
+                if args.path.stat().st_size > 2 * 1024 * 1024:
+                    raise ValueError("Storyboard input exceeds 2 MiB")
+                result = storylens.validate_storyboard(json.loads(args.path.read_text(encoding="utf-8")))
             elif args.command == "show":
                 result = storylens.show(args.media_id)
             elif args.command == "transcript":
@@ -197,7 +270,8 @@ def main(argv=None):
                 if args.command == "export":
                     result["items"] = [storylens.catalog.get(item["id"]) for item in result["items"]]
         emit(result, args.json or args.command in {"export", "events", "event", "event-create",
-                                                "event-rename", "feedback", "preferences"})
+                                                "event-rename", "feedback", "preferences", "storyboard",
+                                                "storyboard-check"})
         return 2 if result.get("failed") else 0
     except (OSError, ValueError, TypeError, RuntimeError, KeyError, sqlite3.Error) as error:
         if args.json and args.command != "serve":

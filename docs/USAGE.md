@@ -21,6 +21,8 @@ Global options precede the command: storylens [OPTIONS] COMMAND ... .
 | event-rename EVENT_ID TITLE | Rename a registered manual event |
 | feedback MEDIA_ID [--set JSON | --clear FIELD... | --clear-all] | Read or patch independent corrections |
 | preferences [--set JSON] | Read or patch grouping thresholds |
+| storyboard [--duration SECONDS] [--strategy balanced/technical/story] [--weights JSON] [--required ID] [--excluded ID] [--image-seconds N] [--clip-seconds N] [--text QUERY] [--depth fast/standard/deep] | Complete portable storyboard JSON from stored evidence; no inference unless text is supplied |
+| storyboard-check PATH | Validate edited storyboard JSON against current source coverage and feedback; emit complete validated JSON |
 | job --allow-root DIR start/status/cancel/resume/result/list ... | Durable local work and checkpoint-based progress; JSON output |
 | serve --allow-root DIR | Optional official-SDK MCP stdio server; repeat roots explicitly |
 
@@ -155,3 +157,76 @@ Event grouping is conservative: no model loading, no inference, no filesystem mt
 Install `python -m pip install -e ".[mcp]"`, then launch `storylens --database /local/catalog.sqlite3 serve --allow-root /mounted/media`. No listener is opened. Use the trusted installed executable in your host configuration, never an automatic package/model download command. Stdout is reserved for MCP protocol traffic; diagnostics go to stderr. See [Codex/Claude setup](INTEGRATIONS.md#mcp-setup-for-codex-and-claude-code) and [bounded result contracts](API.md).
 
 The server now also exposes event/feedback tools (M6): `list_events`, `show_event`, `create_event`, `rename_event`, `get_feedback`, `set_feedback`, `reset_feedback`, `get_preferences` and `set_preferences`. Use these to review candidates, assign manual events and adjust grouping thresholds without provider/path configuration changes.
+
+## Recommendations and editable storyboards (M7)
+
+~~~sh
+storylens storyboard --duration 60 --strategy balanced > storyboard.json
+storylens storyboard --duration 90 --required 'sha256:ID' --excluded 'sha256:OTHER_ID'
+storylens storyboard --weights '{"technical":0.2,"relevance":0.3,"story":0.5}'
+# Explicitly opt into the configured local encoder, over already stored embeddings:
+storylens --embedding-model /models/siglip storyboard --text "holiday at the beach" --depth fast
+storylens storyboard-check storyboard.json
+~~~
+
+Repeat `--required`/`--excluded` for multiple identities. They merge with independent feedback: whole-media `include` requires at least one selection, `exclude` forbids selection, include segments mandate their full union, and exclude segments prohibit overlap. Conflicts, unknown requested IDs, missing required sources, unknown required timing and impossible mandatory budgets are errors, never silently weakened constraints. Optional media without valid timing are skipped with warnings. A whole-media include does not require the entire source.
+
+Separate scores lie in [0,1]; missing technical/relevance evidence is null. Image technical scores average available sharpness and unclipped-exposure proxies. Video uses sampled frame sharpness/luma proxies within the candidate plus available source-wide audio clipping; audio uses one minus clipping fraction. Relevance maps same-space cosine as `(cosine+1)/2`; absent query evidence is not a negative judgment. `--text` performs explicit local query inference through the existing search contract; only the top 500 compatible matches receive relevance, and larger collections disclose this limit.
+
+Story is a disclosed heuristic: half inverse eligible event membership plus half transcript-timed conversation coverage. Undated review buckets do not count as factual events. It is not emotional importance, semantic comprehension, confidence, or a guarantee of diverse event representation.
+
+| Strategy | Technical weight | Relevance weight | Story weight |
+| --- | --- | --- | --- |
+| balanced | 0.40 | 0.25 | 0.35 |
+| technical | 0.80 | 0.10 | 0.10 |
+| story | 0.15 | 0.15 | 0.70 |
+
+Custom weights require exactly these three nonnegative finite components, at least one positive. Weights normalize to sum 1; each candidate's total renormalizes over available components. No available positive-weight evidence yields total 0.
+
+Imported transcript timing takes precedence over inferred transcription. Overlapping cues and gaps <=2 seconds form atomic conversation blocks: selected blocks remain whole, even across scene boundaries. A mandatory interval expands to cover intersecting blocks. An excluded span interrupting a block makes that entire block unavailable; a conflicting mandate fails. Oversized optional conversations are skipped with warnings, not trimmed. This preserves timing continuity, not verified meaning; missing transcripts cannot establish conversation boundaries.
+
+Default image holds are 4 seconds; nonspeech clips target 10 seconds, split at stored scene boundaries and exclusions. Required intervals allocate first. Whole-media requirements reserve feasible candidates for all required identities before score preference; remaining candidates pack greedily by score, media ID and source start. Nothing is shortened to fill the remaining budget. This is deterministic, not optimal knapsack packing. Output defaults to media-ID/source-time order, not capture chronology or a finished dramatic sequence.
+
+Portable [storyboard-v1 JSON](../src/storylens/schemas/storyboard-v1.schema.json) contains source IDs, absolute half-open source times (null for images), durations, separate scores, required/excluded sets, rationale and caveats; no paths or transcript text. Edit title, playback order, image holds and source intervals in JSON, update each duration and `total_seconds`, then run `storyboard-check`. Current feedback, source coverage, speech-block integrity, duplicates/overlaps and the hard duration budget are revalidated. Do not erase required/excluded arrays to bypass feedback. Rescanned moved bytes keep their IDs. Rescan changed media before relying on indexed evidence; validation does not rehash sources.
+
+Bounds: at most 10,000 current referenced media, 100,000 generated candidates, 500 selected entries, and 2 MiB CLI input JSON. Overflow is an explicit error, not a truncated result. Use longer clip targets or a smaller catalog when candidate generation exceeds its bound. MCP returns complete storyboards up to its 131,072-byte serialized response budget; larger documents fail explicitly and need a shorter duration or local CLI export. These commands do not write sources or render; optional editor exchange is separate.
+
+## Optional FilmCraft interchange (M8)
+
+Install `storylens[mcp]` and obtain a trusted FilmCraft **0.9.0** CLI separately. StoryLens never downloads it automatically. Use its absolute executable path; no shell or desktop bridge is launched. This workflow keeps the storyboard portable and creates a new `.fcproj`, never overwriting an existing editor project.
+
+~~~sh
+storylens filmcraft --executable /opt/filmcraft/bin/filmcraft-cli discover
+storylens storyboard --duration 60 > storyboard.json
+# Review/edit the storyboard, its source ranges, exclusions and required media:
+storylens storyboard-check storyboard.json
+storylens filmcraft --executable /opt/filmcraft/bin/filmcraft-cli create storyboard.json \
+  --output /local/edits/holiday.fcproj --allow-root /mounted/media --approve \
+  --fps 24 --width 1920 --height 1080
+storylens filmcraft --executable /opt/filmcraft/bin/filmcraft-cli preview \
+  --project /local/edits/holiday.fcproj --output /local/edits/review.png \
+  --seconds 1 --allow-root /mounted/media --approve
+# Inspect the PNG and project before separately approving export:
+storylens filmcraft --executable /opt/filmcraft/bin/filmcraft-cli export \
+  --project /local/edits/holiday.fcproj --output /local/edits/holiday.mp4 \
+  --allow-root /mounted/media --approve
+~~~
+
+Keep the catalog selection consistent with global `--database` before `filmcraft`. Output parents must exist; outputs must be new paths outside every approved source root. Repeat `--allow-root` for additional source directories. Missing approval, changed source hashes, unsupported versions, private/proxy/offline source references and existing outputs fail. Creation checks current storyboard feedback again and rehashes every selected source before import and before save. Editing source files requires rescanning first. The external editor is trusted, not sandboxed; use OS confinement/read-only mounts for stronger privacy.
+
+Supported sequence rates: 24, 25, 30, 50, 60, 24000/1001, 30000/1001 and 60000/1001. Entry durations must represent whole sequence frames (only <=1 ns decimal representation error is tolerated); off-grid/sub-frame entries fail rather than silently moving cuts across exclusions or speech boundaries. Edit holds/durations or choose another rate, then revalidate the storyboard. Source in points remain absolute presentation times and convert to 254,016,000,000 ticks/second. Zero origins are supported; positive MP4/MOV/M4V origins require the editor's imported duration to equal catalog presentation end. Negative, rebased or unknown nonzero mappings fail rather than guessing an offset. Speed/reverse/edited-sequence remapping are not added.
+
+Preview is a new PNG at a time inside the active sequence; export is an entire-sequence H.264/AAC MP4 with software encoding. Container/audio padding can exceed video duration slightly: use inspected sequence ticks and video frame count for cut/budget timing. All serialized file-backed project sources must be approved and online, including unused assets. Proxy/offline media and unsupported native project schemas are rejected before rendering. Writes publish only completed artifacts and never overwrite existing files. Reports contain per-operation results/errors; partial in-memory edits are not transactional and are discarded on session close. Inspect any failure, never blindly retry a non-idempotent command.
+
+Import a **saved source transcript** without another transcription run:
+
+~~~sh
+storylens filmcraft --executable /opt/filmcraft/bin/filmcraft-cli transcript \
+  --project /local/edits/holiday.fcproj --item-id 4 --media-id 'sha256:SOURCE_ID' \
+  --allow-root /mounted/media --approve
+~~~
+
+Use an actual item ID from editor inspection, never a filename-derived ID. Only schema 15 saved local-file media transcripts are supported. The item's authorized file must match the catalog SHA-256; supplied word ticks/speaker labels are preserved in ordinary transcript results, checked against source coverage, and remain unverified speech evidence. Derived sequence transcript times are not source times and are not imported. Word runs with the same speaker and gaps <=2 seconds become segments without discarding original words. Storyboard, project and transport JSON are bounded to 2 MiB each; discovery/result failures are explicit, never truncated edit plans.
+
+`--request-timeout SECONDS` belongs after `filmcraft` and before its action (default 300 per request); a timeout closes the SDK session and does not automatically retry. Export jobs are editor-owned, not StoryLens durable analysis jobs. The generated-fixture Linux runtime was verified; user review of private holiday media and desktop/cross-platform workflows remain acceptance work.
+

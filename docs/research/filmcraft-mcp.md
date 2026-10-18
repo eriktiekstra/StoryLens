@@ -309,3 +309,125 @@ args = ["serve", "--allow-root", "/absolute/path/to/media"]
 ### Windows durable-worker process boundary
 
 The official SDK 2.3 Windows stdio client assigns its server to a Job Object with KILL_ON_JOB_CLOSE and closes that job during transport cleanup ([tagged source](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/src/mcp/os/win32/utilities.py), [shutdown source](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/src/mcp/client/stdio.py)). DETACHED_PROCESS does not remove inherited Job Object membership. StoryLens durable jobs therefore use local Windows PowerShell with the installed System.Management .NET WMI API to invoke Win32_Process.Create, with an explicit allowlisted environment and detached/breakaway startup flags; user values travel as JSON in a private launcher environment value, not script interpolation. See Microsoft [Win32_Process.Create](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/create-method-in-class-win32-process), [Win32_ProcessStartup](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-processstartup) and [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects). This is an explicit OS dependency for durable Windows launch, not an attempt to weaken client cleanup or silently fall back to connection-bound work.
+
+## M8 pinned FilmCraft v0.9.0 source-mapping addendum — 2026-10-18
+
+**Evidence level:** the APIs below were checked against the actual **v0.9.0** source, not inferred from earlier `main` research. This addendum records **source facts, not runtime verification**: no FilmCraft process, build, test, or media operation was run for this research. The [GitHub recursive tag tree](https://api.github.com/repos/storytold/filmcraft/git/trees/v0.9.0?recursive=1) resolved to `4a69a038d32761f604b3c7e4845b21fb40b3cbe4`. The pinned [agent reference](https://raw.githubusercontent.com/storytold/filmcraft/v0.9.0/docs/agents.md) and the implementation links below are the owning sources. Any separately recorded runtime smoke evidence has a different scope.
+
+### Exact commands for a new, isolated storyboard project
+
+These are **`command_run` argument objects**; submit them to the discovered MCP tool of that name. All numeric IDs must come from the corresponding operation/inspection, not from these illustrative values or filenames. Paths in examples are caller-selected authorized locations, not files this research created. [V9-C, V9-M]
+
+| Operation | Exact command/arguments | Source-defined result and important boundaries |
+| --- | --- | --- |
+| New empty project | `{"id":"file.newProject","params":{"name":"Storyboard"}}` | Resets project/history/editor state, not an undoable protection for an existing session. Start a **fresh headless server with no `--project` and no `--demo`** instead of using this on an editor bridge. |
+| New empty active sequence | `{"id":"file.newSequence","params":{"name":"Storyboard","width":320,"height":180,"fps":24,"sampleRate":48000,"video":1,"audio":1,"mix":"Stereo"}}` | `{"sequence":id}`. Omitting `fromItem` / `fromItems` is essential: those parameters also place source clips. `video` / `audio` are track counts here, max 256 each; defaults are three each. |
+| Configure active sequence | `{"id":"sequence.settings","params":{"width":320,"height":180,"fps":24,"sampleRate":48000,"dropFrame":false}}` | `{"scaledClips":count}`; configure before placing. FPS change does not itself promise retiming existing clips. Numeric `fps`, not a `{num,den}` object or rational string. |
+| Import one ordinary media file | `{"id":"file.import","params":{"paths":["/approved/media/shot.mp4"],"imageSequence":false}}` | Normally `{"items":[id],"errors":[]}`. Other branches add `sequences`, `documents`, `ingest`, or `imageSequences`. **Nonempty `errors` can accompany successful imports**; IDs alone do not establish complete success. |
+| Place image without sound | `{"id":"timeline.place","params":{"item":id,"track":"V1","time":0,"sourceIn":0,"duration":508032000000,"video":true,"audio":false,"insert":false}}` | `{"clips":[clipId]}`; explicit two-second duration avoids the user's still-default-duration preference. Do not enable numbered-image-sequence import for an ordinary still. |
+| Place audio only | `{"id":"timeline.place","params":{"item":id,"track":"A1","time":0,"sourceIn":254016000000,"duration":508032000000,"video":false,"audio":true,"insert":false}}` | `{"clips":[clipIds...]}`; `track:"A1"` selects sound alone. Never also supply `audioTrack` when `track` names an audio track. |
+| Place video and its audio | `{"id":"timeline.place","params":{"item":id,"track":"V1","audioTrack":"A1","time":508032000000,"sourceIn":254016000000,"duration":508032000000,"video":true,"audio":true,"insert":false}}` | `{"clips":[clipIds...]}`; linked picture/sound at speed 1, forward. For silent picture set `audio:false` explicitly. Inspect the result rather than assuming exactly two clips. |
+| Inspect | `{"id":"project.inspect","params":{}}`, `{"id":"sequence.inspect","params":{}}` | Shapes below. MCP `doc_inspect {}` combines them as `{"project":...,"sequence":...}`; absent/error sequence becomes `null` in that wrapper. |
+| Save the generated project | `{"id":"file.saveAs","params":{"path":"/approved/output/storyboard.fcproj"}}` | `{"path":str,"bytes":n,"ms":number,"backup":null-or-path}`; adopts path, names project after file stem, marks clean. |
+| Save a copy without adopting it | `{"id":"file.saveCopy","params":{"path":"/approved/output/storyboard-copy.fcproj"}}` | Same result shape; does not change current path/clean state. `file.save {"path":...}` also exists; omitted path uses adopted path. |
+| Reopen saved copy | `{"id":"file.open","params":{"path":"/approved/output/storyboard.fcproj"}}` | `{"path":str,"schemaVersion":n,"migrated":bool,"missingMedia":...}`; installs project, resets history/media pool/editor state, restores saved view when preference allows. Inspect `activeSequence`, then explicitly open the desired sequence if necessary. |
+| Activate known sequence | `{"id":"sequence.open","params":{"item":sequenceId}}` | Use the sequence item ID returned by creation/inspection; do not confuse it with a clip or track ID. |
+
+Source: [command registry, creation/import/save/open/placement and inspectors][V9-C]. The MCP `media_import` tool accepts `{paths:[str],bin?:id,image_sequence?:bool}` and translates `image_sequence` to engine `imageSequence`; do not mix their spellings. `file.import` also recognizes captions/interchange documents, so restrict storyboard imports to validated media, not arbitrary project/document paths. Its explicit `imageSequence:false` still permits **preference-controlled auto-detection** of a single numbered still: reject/inspect an unexpected `imageSequences` result rather than assuming the flag disables detection. Import may also run configured ingest/transcription; isolated data/preferences and checking the complete result are necessary. [V9-C, V9-M]
+
+**Track mapping:** `track` and `audioTrack` accept actual track IDs or names such as `V1`, `A2`, not zero-based indexes. An explicit nonexistent track is an error; `audioTrack` cannot name video. Omitted destinations use session source-patching defaults and should not be used by a deterministic adapter. `sequence.addTracks` accepts, for example, `{"video":1,"audio":1}`; creating the required counts up front is simpler. Multiple source audio streams or interpreted channel mappings may place additional sound clips and grow audio tracks below the requested destination. `insert:false` is **overwrite**, not collision rejection; preflight overlaps and gaps in StoryLens. [V9-C]
+
+**Inspection shapes:** `project.inspect` returns `{name,path,dirty,revision,root:{id,name,children:[...]},activeSequence,sourceItem}`. An item child is `{item,name,type,duration,label}`; bin children recurse. `sequence.inspect` returns `{id,name,settings,duration,durationFrames,playhead,in,out,split,markers,video:[tracks],audio:[tracks],selection,...}`. Each track includes `{id,name,locked,syncLock,enabled,muted,solo,items:[clips],transitions:[...]}`. Each clip includes `{clip,item,name,start,duration,startFrame,durationFrames,sourceIn,speed,reverse,end,endFrame,sourceOut,gainDb,enabled,link,label,effects}`. `settings` is serialized project data: **`frame_rate:{num,den}`**, `sample_rate`, `drop_frame`, etc., not the camelCase command spelling. [V9-C, V9-P]
+
+### Time conversion, frame snapping, and nonzero presentation origins
+
+- One second is **254,016,000,000 ticks**. Ticks serialize as JSON signed integers; `TimeRange` is half-open `[start,start+duration)`. `time_p` accepts `time` (ticks), `frame`, `seconds`, or `timecode`, in that precedence; prefixed variants are `startTime`, `startFrame`, `startSeconds`, etc. Use integer ticks for placement/source coordinates. [V9-T, V9-C]
+- `timeline.place` has **no `sourceOut` input**. Supply `sourceIn` and `duration`; speed is initially 1.0 and `reverse:false`. At speed 1 the inspected source out is `sourceIn + actualDuration`. Unsupported keys nested under `command_run.params` are not the MCP wrapper's strict top-level schema and may be ignored: sending `sourceOut` would not implement a trim. [V9-C, V9-P, V9-M]
+- Placement independently snaps requested `time` and requested `time + duration` to nearest **sequence** frame, and uses their difference. A tie goes to the **earlier** boundary. `sourceIn` is not frame-snapped by that parser. Track-item construction then enforces at least one sequence frame: collapsed/zero/sub-frame ranges must be refused by the adapter rather than relying on a faithful empty placement. Inspect actual start/end/sourceOut after placement. [V9-C, V9-P, V9-T]
+- Sequence numeric `fps` uses `FrameRate::from_f64`: select a common rate within 0.005 fps (so 23.976 → 24000/1001), otherwise `(round(fps*1000),1000)` reduced. A positive rate is required. Do not promise arbitrary exact rational sequence FPS through this API. `sequence.inspect.durationFrames` counts a partial final frame as export does; derive duration from inspected ticks/frame rate, not rounded decimal FPS. [V9-T, V9-C]
+- **FilmCraft media time is not universally “seconds since first packet.”** MP4 video lookup converts the requested tick directly to track presentation units; `sample_at_presentation_time(t)` looks up raw PTS at `t - edit_offset`. Demux derives `edit_offset` from the leading empty edits minus the first nonempty edit's media start. Thus a five-second leading empty edit remains part of that source presentation timeline. Its duration is the sum of edits (unless fragmented/invalid), not necessarily last PTS minus first PTS. The lookup before the first presentation sample returns the first sample, so a plausible preview can conceal a wrong origin. [V9-MP4, V9-ISO]
+- **Exception:** MP4 video with *no video edit list* may be rebased by `rebase_unedited_video`: when the first video presentation timestamp is positive, subtract the earliest nonnegative start among video and audio from video/audio together. An audio start at zero prevents that shift. `snap_to_frame_grid` may also adjust near-CFR sample PTS relative to the first picture, but preserves true VFR/off-grid streams. These behaviors are not an exported general-purpose source-origin mapping API. [V9-MP4]
+- **Recommended fail-closed mapping / [INFERENCE]:** retain StoryLens absolute source presentation seconds and explicit origin metadata. For containers/fixtures where FilmCraft's media domain is verified equal to StoryLens's presentation domain, convert that absolute time directly to ticks (e.g. absolute 5.5 s → 1,397,088,000,000 ticks); **do not blindly subtract 5 s**. If the decoder rebases, use only an explicitly established offset, not guessed duration differences. Refuse unsupported containers, unverified positive-origin mappings, speed/reverse/holds, out-of-bounds ranges, collapsed frame spans, or mismatched FPS instead of silently shifting media. A new saved-copy workflow does not establish correct media-time alignment by itself.
+
+### Preview, export wait, and saved-copy operation sequence
+
+`render_preview` (alias of `render_frame`) is an MCP tool, **not an engine command ID**. Exact arguments: `{"seconds":0.5,"max_side":320}`. Headless renders without changing playhead/selection; PNG result content is an image block `{type:"image",mimeType:"image/png",data:base64}` plus a text note `"rendered frame"`, not inspect JSON. `max_side` defaults to 960; zero means no size limit. Preview success is not evidence that audio is correct or all media is online. [V9-M]
+
+Exact export call:
+
+```json
+{"id":"file.exportMedia","params":{"path":"/approved/output/storyboard.mp4","format":"h264","range":"entire","width":320,"height":180,"audio":true,"hardwareEncoding":"off","wait":true}}
+```
+
+Explicit `range:"entire"` avoids inherited sequence In/Out. Custom exclusive range uses `{"range":"custom","startTime":0,"endTime":508032000000}` (or `startSeconds` / `endSeconds`, etc.). Supported range modes are `entire`, `inOut`, `workArea`, `custom`. The source snapshots the project, validates settings/range and checks whether the encoder is available; source support does not guarantee a particular installed binary's codec availability. `export.formats` / `export.resolve` and the installed command catalog are discovery gates. [V9-E]
+
+With wait, successful engine/MCP JSON is `{job,path,result,offlineMedia}` (optional `preset`). `result` is `{path,frames,seconds,bytes,render_fps}` with optional `extra_files`; keys are exactly these, including snake_case `render_fps`. **`seconds` is an export report field, not a verified source/timeline alignment measurement.** Failure is a tool-error result; reject missing/null reports, `result.error`, unexpected output path, nonpositive bytes/frame counts when frames are required, and any nonempty `offlineMedia`. Offline items are `{item,name,path,status,error}` with status `missing`, `offline`, or `unreadable`; their placeholder frames do not automatically fail the export. [V9-E, V9-X, V9-L]
+
+Without wait, result is `{job,path}` and encoding continues. `jobs.list {}` returns an array of `{id,label,progress,etaSeconds,done,total,status,finished,result}` plus export `offlineMedia`; `jobs.cancel {"job":id}` requests cancellation. The MCP waiting handler starts the engine export with wait false, polls every 100 ms, forwards optional progress notifications, then assembles the waiting result. Cancellation requests job cancellation, waits up to 600 polls, and attempts to remove only matching recent partial output/numbered frames/caption sidecars. This is **not durable jobs, transactional output, guaranteed cleanup after process death, or safe overwrite protection**. Use fresh authorized output paths, no blind retry after ambiguous disconnect. [V9-E, V9-L]
+
+**Recommended order / [INFERENCE]:** fresh isolated headless session → discover required tool/command surface → create empty sequence/configure FPS → import each validated source and check `errors`/item count → place deterministic track/range entries and inspect actual results → save to a new `.fcproj` → reopen it in a fresh isolated session → inspect IDs/settings/clip mapping/missing media → render chosen preview frames → export to a distinct new path with wait → validate report and `offlineMedia`. Never route this procedure through a live user editor session or assume `saveCopy` copies/embeds source media.
+
+### Transcript interchange: actual import format and offsets
+
+The actual native transcript import is **`transcript.set`**, not caption import and not `file.exportInterchange`. The latter supports EDL/XML/FCPXML/OTIO/AAF/OMF timeline interchange, not a transcript JSON format. `transcript.rs` registers no dedicated transcript-export command. To deliver StoryLens text, export the following **command payload** for the caller to bind to an imported media ID and invoke:
+
+```json
+{
+  "id": "transcript.set",
+  "params": {
+    "item": 42,
+    "transcript": {
+      "language": "en",
+      "source": "storylens",
+      "speakers": [{"name": "Narrator"}],
+      "words": [
+        {"text": "Hello,", "start": 1397088000000, "end": 1447891200000, "speaker": 0, "confidence": 0.9}
+      ]
+    }
+  }
+}
+```
+
+Here `42` is an illustrative **media item ID to replace**, not stable interchange identity. Word times in this example are media-domain 5.5–5.7 seconds, exclusive end; they are not timeline placement offsets. Speaker is a zero-based index into `speakers`; confidence defaults to 1.0. Result is `{"item":id,"words":count}`. Subclip targets resolve to their parent media item. Missing/empty source becomes `"imported"`. The engine normalizes before validation: drops empty words, trims text, sorts timing, clamps confidence, repairs end-before-start, truncates overlaps and adds missing speaker labels. Therefore check before export: normalization is **lossy**, not proof the submitted timing/text was accepted unchanged. [V9-TR, V9-TM]
+
+StoryLens's existing `load_transcript(...,offset=...)` already adds the supplied offset to segment and word seconds and records `"absolute source presentation seconds; supplied input times plus explicit offset"`. Its serialized JSON is `{schema_version,provenance,source_timing,language,segments:[...]}`, **not** FilmCraft's `{language,source,speakers,words}`. Do not apply `provenance.offset_seconds` again when converting stored normalized words. Map segment speaker strings to stable indexes; map word `probability` to FilmCraft `confidence` only when supplied. **[INFERENCE]** Segment-only SRT/VTT imports lack word-level evidence: refuse native word export or explicitly preserve/report segment granularity; do not fabricate per-word alignment by splitting text. Source: [`src/storylens/transcripts.py`](../../src/storylens/transcripts.py), `normalize`, `load_transcript`, `serialize`. [V9-TM]
+
+`transcript.inspect {}` is the sequence transcript, not a raw media transcript export. It returns `{words,paragraphs,speakers,current,items}`. Words are `{i,text,start,end,speaker,clip,item,confidence}` where `speaker` is a **name**, `i` is sequence word index, and start/end are **sequence ticks**. The audio-track derivation maps media time `m` to `clip.start + round((m - clip.sourceIn)/speed)`, clamps bounds to the clip, includes by midpoint, and prefers earlier audio tracks to avoid duplicates. Disabled/reversed/nonpositive-speed/frame-hold clips contribute no words. The implementation does not filter muted/disabled **tracks** in this derivation; do not claim inspect text equals the audible mix. It only finds transcripts keyed by the track item's media ID, so resolving `transcript.set` through a subclip is not evidence that a subclip timeline instance will contribute words. Avoid nests/subclips in the supported first mapping. [V9-TR, V9-TM, V9-ED]
+
+### Partial failure and unsupported boundaries
+
+- MCP `command_batch` is ordered **non-atomic** execution: `{completed,failed,results:[{ok:true,result}|{ok:false,error}]}`. Default stop-on-error prevents later steps but does not undo prior successes. A failure makes the whole tool result `isError:true` while per-step outcomes remain text JSON. Do not retry an entire failed storyboard batch. [V9-M]
+- Individual `Session::edit` commits cloned project/state only after its closure succeeds; `edit_group` restores project/state/history when a grouped edit fails. This is **not** an all-command/filesystem transaction: `file.import` loops through per-file imports and may return partial success; ingest/auto-transcription have separate outcomes; save/export have external file effects. Save As renames the in-memory project before attempting its write. Failed save therefore does not establish an unchanged session. [V9-C, V9-S]
+- No folder sandbox, media embedding, atomic storyboard transaction, arbitrary edited-sequence backmapping, source-origin API, or standalone native transcript export has been established by this source research. Capability discovery plus narrow validated mapping and isolated fresh outputs is the supported design boundary, not permission to mutate an existing project. [V9-A, V9-C, V9-TR]
+
+### Pinned primary source index
+
+- **V9-A** — [v0.9.0 agent reference](https://github.com/storytold/filmcraft/blob/v0.9.0/docs/agents.md).
+- **V9-C** — [engine command registry and handlers](https://github.com/storytold/filmcraft/blob/v0.9.0/crates/engine/src/commands.rs), especially placement 848–908/968–1085, sequence creation 1178–1261, import 1338–1450, save/open 1499–1524/4312–4415, sequence settings 2171–2257, inspectors 4231–4305.
+- **V9-M** — [MCP argument structs, wrappers, batch and preview](https://github.com/storytold/filmcraft/blob/v0.9.0/crates/automation/src/server.rs), especially 43–86, 147–195, 351–373, 423–470.
+- **V9-P** — [project model, track items and sequence settings](https://github.com/storytold/filmcraft/blob/v0.9.0/crates/project/src/lib.rs), especially `TrackItem::source_out`, `SequenceSettings`, `Project::make_track_item`.
+- **V9-T** — [ticks, rational frame rates and snap rules](https://github.com/storytold/filmcraft/blob/v0.9.0/crates/time/src/lib.rs), especially `Tick`, `TimeRange`, `FrameRate::from_f64`, `snap_nearest`.
+- **V9-MP4** — [MP4 decoding and origin behavior](https://github.com/storytold/filmcraft/blob/v0.9.0/crates/codecs/src/mp4.rs), especially 318–371, 442–444, 474–479, 680–781.
+- **V9-ISO** — [MP4 edit-offset and presentation lookup](https://github.com/storytold/filmcraft/blob/v0.9.0/crates/isobmff/src/demux.rs), especially 137–154 and 511–520.
+- **V9-E** — [export settings/range/job/wait behavior](https://github.com/storytold/filmcraft/blob/v0.9.0/crates/engine/src/export_tools.rs), especially `range_param`, `spawn_export`, `export_media`, `job_json`.
+- **V9-X** — [export report and frame spans](https://github.com/storytold/filmcraft/blob/v0.9.0/crates/export/src/lib.rs), especially `Report`, `export_range`, `frame_span`.
+- **V9-L** — [MCP long-export handling and partial-file cleanup](https://github.com/storytold/filmcraft/blob/v0.9.0/crates/automation/src/long_job.rs).
+- **V9-TR** — [native transcript command handlers and result shapes](https://github.com/storytold/filmcraft/blob/v0.9.0/crates/engine/src/transcript.rs), especially `set`, `inspect`, `commands`.
+- **V9-TM** — [native media transcript schema/normalization](https://github.com/storytold/filmcraft/blob/v0.9.0/crates/project/src/transcript.rs).
+- **V9-ED** — [media-to-sequence word mapping](https://github.com/storytold/filmcraft/blob/v0.9.0/crates/edit/src/transcript.rs), especially `sequence_words`.
+- **V9-S** — [session mutation/rollback, filesystem services and job serialization](https://github.com/storytold/filmcraft/blob/v0.9.0/crates/engine/src/lib.rs), especially `FsServices::write_file`, `Session::edit`, `Session::edit_group`, `Job::to_json`, `media_start`.
+
+[V9-A]: https://github.com/storytold/filmcraft/blob/v0.9.0/docs/agents.md
+[V9-C]: https://github.com/storytold/filmcraft/blob/v0.9.0/crates/engine/src/commands.rs
+[V9-M]: https://github.com/storytold/filmcraft/blob/v0.9.0/crates/automation/src/server.rs
+[V9-P]: https://github.com/storytold/filmcraft/blob/v0.9.0/crates/project/src/lib.rs
+[V9-T]: https://github.com/storytold/filmcraft/blob/v0.9.0/crates/time/src/lib.rs
+[V9-MP4]: https://github.com/storytold/filmcraft/blob/v0.9.0/crates/codecs/src/mp4.rs
+[V9-ISO]: https://github.com/storytold/filmcraft/blob/v0.9.0/crates/isobmff/src/demux.rs
+[V9-E]: https://github.com/storytold/filmcraft/blob/v0.9.0/crates/engine/src/export_tools.rs
+[V9-X]: https://github.com/storytold/filmcraft/blob/v0.9.0/crates/export/src/lib.rs
+[V9-L]: https://github.com/storytold/filmcraft/blob/v0.9.0/crates/automation/src/long_job.rs
+[V9-TR]: https://github.com/storytold/filmcraft/blob/v0.9.0/crates/engine/src/transcript.rs
+[V9-TM]: https://github.com/storytold/filmcraft/blob/v0.9.0/crates/project/src/transcript.rs
+[V9-ED]: https://github.com/storytold/filmcraft/blob/v0.9.0/crates/edit/src/transcript.rs
+[V9-S]: https://github.com/storytold/filmcraft/blob/v0.9.0/crates/engine/src/lib.rs

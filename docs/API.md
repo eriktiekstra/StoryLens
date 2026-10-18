@@ -1,6 +1,6 @@
 # JSON contract (1.0)
 
-The CLI and Python service run without a web server. [Packaged JSON Schema](../src/storylens/schemas/results-v1.schema.json) uses Draft 2020-12 for core result envelopes, metadata/technical/semantic/audio/transcript stages, duplicate pages, scene pages and semantic search. Extractor tags/provenance allow documented extension fields. Result schema version is independent of package version, catalog/job/feedback database user_version and algorithm version. Durable jobs, bounded MCP envelopes and [M6 curation](../src/storylens/schemas/curation-v1.schema.json) have separate schemas, available through SDK resources below.
+The CLI and Python service run without a web server. [Packaged JSON Schema](../src/storylens/schemas/results-v1.schema.json) uses Draft 2020-12 for core result envelopes, metadata/technical/semantic/audio/transcript stages, duplicate pages, scene pages and semantic search. Extractor tags/provenance allow documented extension fields. Result schema version is independent of package version, catalog/job/feedback database user_version and algorithm version. Durable jobs, bounded MCP envelopes, [M6 curation](../src/storylens/schemas/curation-v1.schema.json) and [M7 storyboards](../src/storylens/schemas/storyboard-v1.schema.json) have separate schemas, available through SDK resources below.
 
 | Result | Fields |
 | --- | --- |
@@ -15,6 +15,7 @@ The CLI and Python service run without a web server. [Packaged JSON Schema](../s
 | create/rename manual event | schema_version, id, title, updated_at |
 | feedback | schema_version, media_id, values, updated_at |
 | preferences | schema_version, values, updated_at |
+| storyboard / storyboard-check | schema_version, kind, title, duration_seconds, total_seconds, strategy, weights, required, excluded, items, warnings, provenance |
 | Fatal handled error | schema_version, error |
 
 ## Identity, paths and stages
@@ -75,6 +76,14 @@ The merged settings must satisfy `gap_seconds <= semantic_gap_seconds <= max_eve
 Event/member pages default to 50, core/CLI limit 1..500, MCP limit 1..100. Pass `next_cursor` unchanged for the same list or member query; null means finished. Cursors bind current effective evidence, grouping settings, feedback state and query scope. Changed state or using a list cursor for members/another event is rejected; restart pagination and refresh automatic IDs. `snapshot` is a state fingerprint, **not** a permanent frozen snapshot or a promise to serve old evidence later.
 
 
+## Portable storyboard contract (M7)
+
+`schema_version="1.0"` and `kind="storylens_storyboard"` identify a strict complete document. `duration_seconds` is the positive hard budget; `total_seconds` equals the sum of entry durations. `strategy` is `balanced`, `technical` or `story`; `weights` contains normalized nonnegative `technical`, `relevance` and `story` components summing to 1. `required`/`excluded` hold effective whole-media ID sets; mandatory segment coverage additionally comes from current feedback. `provenance` contains `algorithm="recommendations-1"` and disclosed heuristic `caveats`.
+
+Each entry contains exactly `media_id`, `kind`, `start_seconds`, `end_seconds`, `duration_seconds`, `required`, `scores` and `reason`. Images have null endpoints and a positive hold duration. Audio/video endpoints define absolute half-open source intervals, including negative/nonzero origins; duration is end minus start. `scores` contains nullable technical/relevance, numeric story and weighted total, all available scores in [0,1]. These are proxies, not probabilities. Entries preserve playback order. No paths or transcript words are exported.
+
+Validation checks exact shape, finite numbers, totals/budget, current source timing, effective feedback, include-segment coverage, excluded spans, duplicate images, overlapping source intervals and whole transcript-timed conversation blocks. Removing feedback constraints from edited arrays fails. Title, order, holds and intervals are editable without rewriting catalog/feedback or sources. [Scoring, packing and timing caveats](USAGE.md#recommendations-and-editable-storyboards-m7) define the complete policy and resource bounds.
+
 ## Python service
 
 ~~~python
@@ -92,6 +101,17 @@ Use stage="metadata"/"technical" for inference-free subsets; use depth="fast"/"s
 
 M6 methods are `app.events(limit=50, after="")`, `app.event(event_id, limit=50, after="")`, `app.create_event(title)`, `app.rename_event(event_id, title)`, `app.feedback(media_id)`, `app.set_feedback(media_id, patch)`, `app.reset_feedback(media_id, fields=None)`, `app.preferences()` and `app.set_preferences(patch)`. Reset with no fields removes all overrides; a list removes only named fields.
 
+M7 methods are `app.recommend(duration_seconds=60, strategy="balanced", weights=None, required=None, excluded=None, image_seconds=4, clip_seconds=10, text=None, depth="standard")` and `app.validate_storyboard(document)`. Both return the complete portable document. `text` alone opts into the configured local same-space query encoder; otherwise recommendations use stored evidence only. Missing optional timing is a warning; unsatisfied mandates or resource overflow are errors. Queries operate on current regular, nonsymlink references; rescan source changes before relying on indexed identity.
+
+## Optional FilmCraft exchange (M8)
+
+`storylens.filmcraft_transport.FilmCraft(executable, project=None, timeout=30)` is an async context manager, imported without the optional SDK until used. `discover()` returns `server`, complete `initialization`, lossless tool definitions, `command_list` and `doc_inspect`. Paginated tools are drained, including empty-string cursors; repeated cursors, ambiguous/oversized results and tool errors fail explicitly. Requests are bounded; failed requests close the session. The adapter uses object/array JSON tools, not image-content `render_frame` results or null-returning engine commands.
+
+`storylens.filmcraft.create(app, document, executable=..., output=..., roots=..., approved=False, fps="24", width=1920, height=1080, timeout=30)` creates a **new** FilmCraft project. `render(executable=..., project=..., output=..., roots=..., approved=False, seconds=None, timeout=300)` writes a new H.264 MP4, or PNG preview when seconds is supplied. Reports contain `schema_version="1.0"`, `status="succeeded"|"failed"`, destination, `operations` and, on failure, `error`; successful reports include inspected `sequence`. Creation also reports discovered `server` and catalog-to-editor `media` IDs. Preflight/connection errors raise; CLI emits nonzero status. Reports may include temporary paths and must not be treated as portable storyboards.
+
+`import_transcript(app, project=..., item_id=..., media_id=..., roots=...)` imports raw saved source words from FilmCraft project schema 15, never derived edited-sequence words. The explicitly mapped local file must match the catalog content identity. The stored ordinary transcript envelope uses `format="filmcraft-project"`, algorithm `filmcraft-transcript-import-1`, original project SHA-256/name, editor item ID and zero automatic offset. Speaker indices resolve to supplied names; word ticks become absolute source seconds and are checked against source coverage. Unsupported versions, rebased/unknown origins, out-of-source words and wrong identities fail. [CLI approval, timing and output limits](USAGE.md#optional-filmcraft-interchange-m8).
+
+
 ## Durable jobs (M5)
 
 `storylens.jobs.JobManager(config, roots)` supplies start(path, analyze=True, stage="all", depth=None, force=False), status(id), cancel(id), resume(id), result(id) and list(limit=50, after=""). CLI `job` and MCP call the same manager. Roots are explicit existing media directories, not a tool-call override. State lives in a local catalog-adjacent `.jobs.sqlite3` database.
@@ -102,9 +122,11 @@ Cancellation is persisted and checked at file/stage and catalog commit boundarie
 
 ## MCP stdio envelopes (M5)
 
-Install the optional mcp extra, then use `serve --allow-root DIR` with trusted startup configuration. The 23 tools are list_media, show_media, export_media, scenes, search, duplicates, import_transcript, export_transcript, start_job, job_status, cancel_job, resume_job, job_result, list_jobs, list_events, show_event, create_event, rename_event, get_feedback, set_feedback, reset_feedback, get_preferences and set_preferences. Call errors set MCP isError; invalid typed arguments are not successful empty results. The SDK publishes typed input schemas; it does not grant filesystem permission.
+Install the optional mcp extra, then use `serve --allow-root DIR` with trusted startup configuration. The 25 tools are list_media, show_media, export_media, scenes, search, duplicates, import_transcript, export_transcript, start_job, job_status, cancel_job, resume_job, job_result, list_jobs, list_events, show_event, create_event, rename_event, get_feedback, set_feedback, reset_feedback, get_preferences, set_preferences, recommend_storyboard and validate_storyboard. Call errors set MCP isError; invalid typed arguments are not successful empty results. The SDK publishes typed input schemas; it does not grant filesystem permission.
 
 The nine M6 tools mirror the service methods: `list_events(limit=50, after="")`, `show_event(event_id, limit=50, after="")`, `create_event(title)`, `rename_event(event_id, title)`, `get_feedback(media_id)`, `set_feedback(media_id, patch)`, `reset_feedback(media_id, fields=None)`, `get_preferences()` and `set_preferences(patch)`. Feedback/preferences `patch` arguments are typed JSON objects, not JSON-encoded strings; only explicitly supplied fields are patched. Nested GPS/segment objects reject unknown keys.
+
+`recommend_storyboard` accepts the M7 service parameters with typed finite numbers, strategy/depth enums, optional weight object and required/excluded ID arrays. `validate_storyboard(document)` accepts the portable JSON object and revalidates it against approved current sources and feedback; it cannot write arbitrary output files. Both filter before scoring/grouping and retain mixed-root manual-event fail-closed behavior. Unlike metadata summaries, storyboard documents are **never truncated**: responses exceeding 131,072 serialized ASCII JSON bytes fail with a tool error. Lower the duration or use local CLI export. Full documents support up to 500 entries, including more than 100 when within the byte budget.
 
 MCP filters unapproved media **before** grouping. A manual relationship spanning approved and unapproved sources fails closed instead of revealing a private title/member or allowing unauthorized assignment/rename. Approve all roots containing that event's assigned sources, or clear your approved media's own assignment with `event_id:null`/reset of `event_id` (or all its overrides). Preferences affect the catalog collection, not just one MCP root, but cannot alter startup provider/path configuration.
 
@@ -114,4 +136,4 @@ The generic size bound also applies to curation evidence: `truncated:true` and `
 
 export_transcript returns lossless serialized JSON/SRT/VTT character pages: text, total_characters and next_cursor. Concatenate text until next_cursor is null; keep format and stored transcript unchanged. Default page8192, maximum16384 characters. No arbitrary output-file writes are exposed.
 
-Read SDK resources `storylens://schemas/results-v1` (installed core results), `storylens://schemas/jobs-v1` (durable state), `storylens://schemas/mcp-v1` (bounded transport envelopes) and `storylens://schemas/curation-v1` (events, corrections, preferences and explicit truncated transport). The packaged schemas are independent of checkout cwd. CLI/core schemas retain their distinct contracts.
+Read SDK resources `storylens://schemas/results-v1` (installed core results), `storylens://schemas/jobs-v1` (durable state), `storylens://schemas/mcp-v1` (bounded transport envelopes), `storylens://schemas/curation-v1` (events, corrections, preferences and explicit truncated transport), and `storylens://schemas/storyboard-v1` (complete portable documents). The packaged schemas are independent of checkout cwd. CLI/core schemas retain their distinct contracts.

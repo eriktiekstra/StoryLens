@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "storylens"
-version = "0.6.0"
+version = "0.8.0"
 description = "Local-first, read-only media indexing and analysis"
 readme = "README.md"
 requires-python = ">=3.11"

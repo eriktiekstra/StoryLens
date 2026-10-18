@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://storylens.dev/schemas/storyboard-v1.schema.json",
+  "title": "StoryLens portable storyboard v1",
+  "description": "Ordered, editable source selections. Runtime validation additionally checks finite numbers, weight normalization, source coverage, current feedback, conversation preservation and duration totals/budget.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "title", "duration_seconds", "total_seconds", "strategy", "weights", "required", "excluded", "items", "warnings", "provenance"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "storylens_storyboard"},
+    "title": {"type": "string"},
+    "duration_seconds": {"type": "number", "exclusiveMinimum": 0},
+    "total_seconds": {"type": "number", "minimum": 0},
+    "strategy": {"enum": ["balanced", "technical", "story"]},
+    "weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["technical", "relevance", "story"],
+      "properties": {
+        "technical": {"$ref": "#/$defs/score"},
+        "relevance": {"$ref": "#/$defs/score"},
+        "story": {"$ref": "#/$defs/score"}
+      }
+    },
+    "required": {"$ref": "#/$defs/mediaIds"},
+    "excluded": {"$ref": "#/$defs/mediaIds"},
+    "items": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/entry"}},
+    "warnings": {"$ref": "#/$defs/strings"},
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "caveats"],
+      "properties": {
+        "algorithm": {"const": "recommendations-1"},
+        "caveats": {"$ref": "#/$defs/strings"}
+      }
+    }
+  },
+  "$defs": {
+    "mediaId": {"type": "string", "minLength": 1, "pattern": "\\S"},
+    "mediaIds": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/mediaId"}},
+    "strings": {"type": "array", "items": {"type": "string"}},
+    "score": {"type": "number", "minimum": 0, "maximum": 1},
+    "nullableScore": {"anyOf": [{"$ref": "#/$defs/score"}, {"type": "null"}]},
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["media_id", "kind", "start_seconds", "end_seconds", "duration_seconds", "required", "scores", "reason"],
+      "properties": {
+        "media_id": {"$ref": "#/$defs/mediaId"},
+        "kind": {"enum": ["image", "audio", "video"]},
+        "start_seconds": {"type": ["number", "null"]},
+        "end_seconds": {"type": ["number", "null"]},
+        "duration_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "required": {"type": "boolean"},
+        "scores": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["technical", "relevance", "story", "total"],
+          "properties": {
+            "technical": {"$ref": "#/$defs/nullableScore"},
+            "relevance": {"$ref": "#/$defs/nullableScore"},
+            "story": {"$ref": "#/$defs/score"},
+            "total": {"$ref": "#/$defs/score"}
+          }
+        },
+        "reason": {"type": "string"}
+      },
+      "allOf": [{
+        "if": {"properties": {"kind": {"const": "image"}}},
+        "then": {"properties": {"start_seconds": {"type": "null"}, "end_seconds": {"type": "null"}}},
+        "else": {"properties": {"start_seconds": {"type": "number"}, "end_seconds": {"type": "number"}}}
+      }]
+    }
+  }
+}

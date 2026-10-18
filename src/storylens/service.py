@@ -325,6 +325,60 @@ class Analyzer:
                 "next_cursor": self._event_cursor(snapshot, event_id, end) if end < len(event["members"]) else None,
                 "provenance": result["provenance"]}
 
+    def _storyboard_media(self):
+        from .events import group_media
+        state = self._user_state().snapshot()
+        items, after = [], ""
+        while True:
+            page = self.catalog.page(100, after)
+            for row in page["items"]:
+                media = self.catalog.get(row["id"])
+                media["feedback"] = state["media"].get(media["id"], {})
+                if not any(Path(p["path"]).is_file() and not Path(p["path"]).is_symlink()
+                           for p in media["paths"]):
+                    values = media["feedback"]
+                    if values.get("selection") == "include" or any(
+                            segment["selection"] == "include" for segment in values.get("segments", [])):
+                        raise ValueError("Required media has no current source reference; rescan or clear its selection")
+                    continue
+                if len(items) >= 10000:
+                    raise ValueError("Recommendations support at most 10000 referenced media")
+                media["transcript"] = self.catalog.transcript(media["id"])
+                items.append(media)
+            after = page["next_cursor"]
+            if after is None:
+                break
+        groups = group_media(items, settings=state["preferences"], manual_events=state["events"])
+        membership = {member["media_id"]: event["id"] for event in groups["events"]
+                      for member in event["members"] if event["kind"] != "undated"}
+        for media in items:
+            media["event_id"] = membership.get(media["id"])
+        return items
+
+    def recommend(self, *, duration_seconds=60, strategy="balanced", weights=None,
+                  required=None, excluded=None, image_seconds=4, clip_seconds=10,
+                  text=None, depth="standard"):
+        from .recommendations import recommend
+        from .storyboard import validate_storyboard
+        items = self._storyboard_media()
+        relevance = None
+        if text is not None:
+            if not isinstance(text, str) or not text.strip():
+                raise ValueError("Recommendation text must be nonempty")
+            matches = self.search(text=text, depth=depth, limit=500)
+            relevance = {item["media_id"]: item["score"] for item in matches["items"]}
+        document = recommend(items, duration_seconds=duration_seconds, strategy=strategy,
+                             weights=weights, required=required, excluded=excluded,
+                             relevance=relevance, image_seconds=image_seconds, clip_seconds=clip_seconds)
+        if text is not None and len(items) > 500:
+            document["warnings"].append("Query relevance is available only for the top 500 same-space search matches.")
+        return validate_storyboard(document, {item["id"]: item for item in items})
+
+    def validate_storyboard(self, document):
+        from .storyboard import validate_storyboard
+        items = self._storyboard_media()
+        return validate_storyboard(document, {item["id"]: item for item in items})
+
     def show(self, media_id):
         return {"schema_version": "1.0", "media": self.catalog.get(media_id)}
 

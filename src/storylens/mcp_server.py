@@ -68,6 +68,13 @@ class PreferencesPatch(BaseModel):
     semantic_depth: Depth = DEFAULT_SETTINGS["semantic_depth"]
 
 
+class RecommendationWeights(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    technical: Annotated[FiniteNumber, Field(ge=0)]
+    relevance: Annotated[FiniteNumber, Field(ge=0)]
+    story: Annotated[FiniteNumber, Field(ge=0)]
+
+
 # Job state is application-owned, not the SDK experimental/protocol Tasks API.
 JOB_SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -313,10 +320,15 @@ def create_server(config, roots):
             return server.tool(**options)(function)
         return register
 
-    async def invoke(operation):
+    async def invoke(operation, *, lossless=False):
         def run():
             try:
-                result = _bounded(operation(), policy)
+                result = operation()
+                if lossless:
+                    if len(json.dumps(result, ensure_ascii=True, allow_nan=False).encode("utf-8")) > MAX_RESPONSE:
+                        raise ValueError("Storyboard exceeds MCP response budget; use a shorter duration or the local CLI for full JSON")
+                else:
+                    result = _bounded(result, policy)
                 return CallToolResult(content=[TextContent(type="text", text=json.dumps(result, ensure_ascii=True,
                                       allow_nan=False))], structured_content=result)
             except (OSError, ValueError, KeyError) as error:
@@ -494,6 +506,36 @@ def create_server(config, roots):
     async def set_preferences(patch: PreferencesPatch) -> CallToolResult:
         """Persist grouping thresholds independently of AI data; no model/network requests."""
         return await invoke(lambda: analyze(lambda app: app.set_preferences(patch.model_dump(exclude_unset=True)), user_state=True))
+
+    @tool(annotations=readonly)
+    async def recommend_storyboard(
+        duration_seconds: Annotated[FiniteNumber, Field(gt=0)] = 60,
+        strategy: Literal["balanced", "technical", "story"] = "balanced",
+        weights: RecommendationWeights | None = None,
+        required: Annotated[list[StrictStr], Field(max_length=500)] | None = None,
+        excluded: Annotated[list[StrictStr], Field(max_length=10000)] | None = None,
+        image_seconds: Annotated[FiniteNumber, Field(gt=0)] = 4,
+        clip_seconds: Annotated[FiniteNumber, Field(gt=0)] = 10,
+        text: Annotated[StrictStr, Field(min_length=1, max_length=4096)] | None = None,
+        depth: Depth = "standard",
+    ) -> CallToolResult:
+        """Recommend complete editable JSON from approved evidence; text explicitly opts into local query inference."""
+        return await invoke(lambda: analyze(lambda app: app.recommend(
+            duration_seconds=duration_seconds, strategy=strategy,
+            weights=weights.model_dump() if weights is not None else None,
+            required=required, excluded=excluded, image_seconds=image_seconds,
+            clip_seconds=clip_seconds, text=text, depth=depth), user_state=True), lossless=True)
+
+    @tool(annotations=readonly)
+    async def validate_storyboard(document: dict) -> CallToolResult:
+        """Validate edited portable JSON against approved sources and current corrections; never write sources."""
+        return await invoke(lambda: analyze(lambda app: app.validate_storyboard(document),
+                                            user_state=True), lossless=True)
+
+    @server.resource("storylens://schemas/storyboard-v1", mime_type="application/schema+json")
+    def storyboard_schema() -> str:
+        """Portable editable storyboard with separate scores and absolute source timing."""
+        return files("storylens").joinpath("schemas/storyboard-v1.schema.json").read_text(encoding="utf-8")
 
     @server.resource("storylens://schemas/curation-v1", mime_type="application/schema+json")
     def curation_schema() -> str:
