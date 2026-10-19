@@ -2,7 +2,7 @@
 
 Local-first, editor-independent media intelligence. MIT licensed; free to self-host.
 
-Current package: 0.8.0 — M1–M7 core capabilities plus optional FilmCraft 0.9.0 interchange: indexing, technical analysis, local semantics, audio/transcripts, an agent API, coarse event grouping with durable corrections, and portable storyboards. StoryLens indexes referenced media, preserves metadata, measures image/audio signals, finds duplicate candidates, extracts timestamped video scenes, groups stored evidence into reviewable events, and recommends budgeted selections with separate technical/relevance/story scores. Opt-in local models provide image/text retrieval, captions and transcription. Durable local jobs and an optional MCP stdio server share the same service as the CLI. No automatic model downloads, cloud fallback, telemetry, subscriptions or accounts. Default analysis and recommendations remain inference-free.
+Current package: 0.9.0 — editor-independent media analysis, events/corrections and portable storyboards, optional FilmCraft 0.9.0 exchange, and M9 release/benchmark tooling. StoryLens indexes read-only sources, preserves metadata, measures technical signals, finds duplicate candidates, extracts timestamped scenes and recommends constrained selections with separate technical/relevance/story scores. Opt-in local models provide retrieval, captions and transcription. Durable FIFO jobs, bounded batches and optional MCP share the same services. No automatic model downloads, cloud fallback, telemetry, subscriptions or accounts. Default analysis and recommendations remain inference-free.
 
 Editable JSON storyboards work without an editor. The optional [FilmCraft workflow](docs/USAGE.md#optional-filmcraft-interchange-m8) discovers real tools, creates a new approved project, imports saved source transcripts, previews and exports; it never edits an existing project in place. See [architecture](ARCHITECTURE.md), [milestones](docs/IMPLEMENTATION_PLAN.md), and primary-source research for [components](docs/research/media-ecosystem.md), [existing applications](docs/research/existing-applications.md), and [FilmCraft/MCP](docs/research/filmcraft-mcp.md).
 
@@ -77,6 +77,7 @@ The output is editable JSON, not a rendered film: change title, playback order, 
 - [CLI, configuration, media formats, privacy and NAS operation](docs/USAGE.md)
 - [JSON contract](docs/API.md) and [packaged JSON Schemas](src/storylens/schemas/)
 - [AI/provider, MCP-host and optional FilmCraft boundaries](docs/INTEGRATIONS.md)
+- [Reproducible distribution, dependency license inventory and release gates](docs/RELEASE.md)
 - [Security](SECURITY.md), [contributing](CONTRIBUTING.md), [changelog](CHANGELOG.md)
 
 No HTTP listener or editor dependency is introduced. `storylens serve --allow-root /mounted/media` runs the optional local MCP stdio transport; [host setup](docs/INTEGRATIONS.md#mcp-setup-for-codex-and-claude-code) requires a trusted executable, local catalog and explicit approved roots.
@@ -94,3 +95,5 @@ Linux/macOS/Windows core/media checks passed across Python 3.11/3.12 in GitHub A
 M7 was exercised on Linux with generated-media CLI and installed-wheel smokes, plus real MCP SDK subprocesses returning 111 lossless storyboard entries, rejecting unauthorized/mixed-root sources and failing explicitly on oversized documents. Conversation preservation is timestamp-based, not a claim of semantic accuracy; no new real-model query inference, cross-platform M7 runtime or editor export was exercised.
 
 M8 headless interoperability was exercised on Linux with the checksum-verified official FilmCraft 0.9.0 release and MCP 2.3: real tool discovery, new-project assembly, save/reopen, source transcript import, PNG review and H.264/AAC export. Generated fixtures covered a 5-second source origin, images/audio/video and 24000/1001 timing. Desktop bridge use, private holiday-media/user review and other editor/platform versions remain unverified.
+
+M9 adds [isolated collection benchmarks/profiles, bounded FIFO batches, conservative CUDA admission and optional Docker operation](docs/USAGE.md#release-operation-and-profiling-m9). It does not certify real NAS throughput, GPU capacity or private-media quality; those acceptance runs are deferred until implementation is complete.

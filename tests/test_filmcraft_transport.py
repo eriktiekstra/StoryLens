@@ -4,7 +4,6 @@ import asyncio
 from contextlib import asynccontextmanager
 import importlib.util
 import json
-import os
 from pathlib import Path
 import sys
 import tempfile
@@ -102,9 +101,9 @@ class FilmCraftTransportTests(unittest.IsolatedAsyncioTestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
-        self.binary = self.root / "filmcraft-cli"
-        self.binary.write_text("not executed", encoding="utf-8")
-        self.binary.chmod(0o700)
+        # The mocked transport never launches it, but this is a real executable
+        # on every supported OS rather than a POSIX chmod-dependent fixture.
+        self.binary = Path(sys.executable).resolve()
         self.events = []
         self.parameters = None
         self.initialize_error = None
@@ -251,9 +250,11 @@ class FilmCraftTransportTests(unittest.IsolatedAsyncioTestCase):
         for binary in (self.root / "absent", self.root):
             with self.subTest(binary=binary), self.assertRaisesRegex(RuntimeError, "executable file"):
                 FilmCraft(binary)
-        self.binary.chmod(0o600)
-        with self.assertRaisesRegex(RuntimeError, "executable file"):
-            FilmCraft(self.binary)
+        # Windows chmod only changes the read-only flag, not execute access.
+        # Exercise denied access without relying on POSIX permission bits.
+        with patch("storylens.filmcraft_transport.os.access", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "executable file"):
+                FilmCraft(self.binary)
 
     def test_invalid_timeout_is_rejected(self):
         for timeout in (0, -1, float("inf"), float("nan")):

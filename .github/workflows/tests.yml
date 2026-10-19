@@ -1,5 +1,7 @@
-name: Foundation tests
+name: Platform and installed-distribution tests
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   tests:
     strategy:
@@ -8,8 +10,11 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python: ['3.11', '3.12']
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
@@ -26,5 +31,56 @@ jobs:
         run: |
           ffmpeg -version
           ffprobe -version
-      - run: python -m pip install -e ".[mcp]"
-      - run: python -m unittest discover -s tests -v
+      - name: Build and install the core wheel
+        shell: python {0}
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import tomllib
+          import venv
+          metadata = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          subprocess.run([sys.executable, "-m", "pip", "install", *metadata["build-system"]["requires"]], check=True)
+          subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation",
+                          "--wheel-dir", "dist", "."], check=True)
+          wheels = list(Path("dist").glob("storylens-*.whl"))
+          if len(wheels) != 1:
+              raise RuntimeError(f"Expected exactly one built wheel, got {wheels}")
+          environment = Path(os.environ["RUNNER_TEMP"]) / "storylens-installed"
+          venv.EnvBuilder(with_pip=True).create(environment)
+          python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+          subprocess.run([str(python), "-m", "pip", "install", str(wheels[0].resolve())], check=True)
+      - name: Exercise installed core without optional SDKs
+        working-directory: ${{ runner.temp }}
+        shell: python {0}
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          checkout = Path(os.environ["GITHUB_WORKSPACE"])
+          environment = Path(os.environ["RUNNER_TEMP"]) / "storylens-installed"
+          python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+          subprocess.run([str(python), "-I", str(checkout / "scripts" / "installed_smoke.py"),
+                          "--checkout", str(checkout)], check=True)
+      - name: Install the wheel with the optional MCP SDK
+        shell: python {0}
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          environment = Path(os.environ["RUNNER_TEMP"]) / "storylens-installed"
+          python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+          wheel, = Path("dist").glob("storylens-*.whl")
+          subprocess.run([str(python), "-m", "pip", "install", f"{wheel.resolve()}[mcp]"], check=True)
+      - name: Run the full regression suite against the installed wheel
+        working-directory: ${{ runner.temp }}
+        shell: python {0}
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          environment = Path(os.environ["RUNNER_TEMP"]) / "storylens-installed"
+          python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+          tests = Path(os.environ["GITHUB_WORKSPACE"]) / "tests"
+          subprocess.run([str(python), "-I", "-m", "unittest", "discover", "-s", str(tests), "-v"], check=True)

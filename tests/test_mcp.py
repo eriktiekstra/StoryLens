@@ -199,6 +199,26 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
             # Invalid calls do not terminate the transport or escalate permissions.
             self.assertEqual((await self.call(session, "list_media"))["items"], [])
 
+    async def test_batch_preflight_is_atomic_and_every_submitted_id_reaches_a_result(self):
+        private = self.outside / "private.png"
+        private.write_bytes(self.image.read_bytes())
+        second = self.media / "second.png"
+        Image.new("RGB", (32, 24), (90, 80, 70)).save(second)
+        async with self.session() as session:
+            await self.failed(session, "start_jobs", {
+                "paths": [str(self.image), str(private)], "operation": "scan"})
+            self.assertEqual((await self.call(session, "list_jobs"))["items"], [])
+            batch = await self.call(session, "start_jobs", {
+                "paths": [str(self.image), str(second)], "operation": "scan"})
+            self.assertEqual(len({item["id"] for item in batch["items"]}), 2)
+            for item in batch["items"]:
+                done = await self.finish(session, item["id"])
+                self.assertEqual((done["status"], done["summary"]["indexed"]), ("succeeded", 1))
+            media = await self.call(session, "list_media")
+            expected = {"sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+                        for path in (self.image, second)}
+            self.assertEqual({item["id"] for item in media["items"]}, expected)
+
     async def test_durable_job_survives_transport_disconnect(self):
         async with self.session() as session:
             started = await self.call(session, "start_job", {"path": str(self.media), "operation": "scan"})

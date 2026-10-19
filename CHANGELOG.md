@@ -2,6 +2,18 @@
 
 Entries describe capabilities and verification at that release. Later milestones supersede earlier future-work lists; historical test counts and model smokes are not current verification guarantees.
 
+## 0.9.0 — 2026-10-19 (M9 release and operational tooling)
+
+- Added deterministic generated image/video/audio fixture manifests and isolated cold/warm catalog benchmarks with counters, environment, wall/process-CPU time, parent high-water RSS, optional cProfile/pstats and explicit cache/measurement caveats. Benchmarks use a new local workspace, never the user's configured catalog, and disable model inference.
+- Added bounded 1..32-root durable batch submission with complete path/option preflight, atomic record creation, per-child launch failure visibility and FIFO catalog scheduling. Resume preserves job creation time and joins the tail. CLI `job batch` and typed MCP `start_jobs` expose every durable ID (26 tools total).
+- Added same-user/local-cache CUDA audio inference serialization with OS-released locks and bounded waits. CPU work is unaffected; no automatic CPU fallback, tensor batching, distributed scheduling or GPU capacity claim is introduced.
+- Pinned the build backend to setuptools84.0.0, explicitly included MIT LICENSE, and added wheel/sdist reproducibility, artifact integrity, sdist-to-wheel parity and isolated core/MCP install checks. Added marker/extra-aware installed dependency/license inventory with primary-source citations, explicit unknowns and native/model/container redistribution boundaries.
+- Added an optional digest-pinned, nonroot Docker recipe with explicit core versions/MCP selection and documented read-only source/state/egress controls. Transitive/apt/container byte reproducibility is not claimed.
+- Replaced editable-install CI with clean installed-wheel/generated-media/core-without-SDK checks followed by MCP/full regression checks across Linux/macOS/Windows and Python3.11/3.12. Corrected the observed Windows chmod assertion and worker-cleanup/process-exit race rather than skipping Windows support.
+- Added operational recovery/failure guidance, including real SQLite capacity-exhaustion coverage, cache/lease/cancellation/permission boundaries and deferred acceptance gates.
+
+A profiled synthetic local run processed 1,004 media references (197,524,218 bytes): cold catalog 17.920 seconds, warm catalog 4.336 seconds with all 1,004 files served from stage caches and no failures. Actual CLI batch preflight/FIFO execution was exercised. Core and optional-MCP containers ran offline/nonroot with read-only sources; all fixture hashes stayed unchanged. Repeated/rebuilt wheel bytes matched; sdist member contents/modes matched, while compressed sdist metadata remained variable. Installed core/MCP dependency closures were complete, with missing SPDX evidence reported explicitly. These are generated-media/software observations, not private holiday-media, NAS, GPU, driver or camera-codec acceptance; that real testing remains deferred until implementation is complete.
+
 ## 0.8.0 — 2026-10-18 (M8 optional FilmCraft interchange)
 
 - Added optional headless FilmCraft 0.9.0 discovery through the official MCP SDK: actual server identity, complete paginated tool schemas, command registry and document inspection. No editor installation/download or core dependency is introduced; failed requests close the session and ambiguous/oversized results fail explicitly.

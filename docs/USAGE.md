@@ -23,8 +23,9 @@ Global options precede the command: storylens [OPTIONS] COMMAND ... .
 | preferences [--set JSON] | Read or patch grouping thresholds |
 | storyboard [--duration SECONDS] [--strategy balanced/technical/story] [--weights JSON] [--required ID] [--excluded ID] [--image-seconds N] [--clip-seconds N] [--text QUERY] [--depth fast/standard/deep] | Complete portable storyboard JSON from stored evidence; no inference unless text is supplied |
 | storyboard-check PATH | Validate edited storyboard JSON against current source coverage and feedback; emit complete validated JSON |
-| job --allow-root DIR start/status/cancel/resume/result/list ... | Durable local work and checkpoint-based progress; JSON output |
+| job --allow-root DIR start/batch/status/cancel/resume/result/list ... | Durable local work, bounded batch admission and FIFO scheduling; JSON output |
 | serve --allow-root DIR | Optional official-SDK MCP stdio server; repeat roots explicitly |
+| benchmark generate DIR / benchmark run PATH --workspace DIR | Generated fixtures or isolated model-free cold/warm catalog measurements and optional profiles |
 
 Global options: --config FILE, --database FILE, --ffprobe EXECUTABLE, --ffmpeg EXECUTABLE, --timeout SECONDS, --scene-threshold NUMBER, --minimum-scene-seconds NUMBER, --max-scenes N, --embedding-model DIRECTORY, --vision-model NAME, --ollama-endpoint ORIGIN, --semantic-timeout SECONDS, --max-audio-seconds SECONDS, --audio-transcription-model DIRECTORY, --audio-transcription-device cpu/cuda, --audio-transcription-language CODE, repeatable --exclude PATTERN, --trust-stat / --no-trust-stat, --json, --version. Help is available per command.
 
@@ -144,6 +145,8 @@ storylens --database /local/catalog.sqlite3 job --allow-root /mounted/media list
 
 States distinguish queued/running/cancel_requested/succeeded/failed/cancelled/interrupted. Cancellation is cooperative at entry/stage boundaries, not an immediate process kill; a current hash or model/decoder stage may finish before cancellation is acknowledged. Committed stages remain reusable. Explicit resume uses current cache keys and does not repeat already cached successful stages merely because the original submission used force. Progress is checkpoint-based, with totals unknown until traversal finishes. Failed media retain bounded per-stage error details; inspect results rather than assuming every indexed item succeeded.
 
+M9 `job --allow-root DIR batch PATH1 PATH2 ...` accepts 1..32 distinct canonical roots with the same `--scan`, stage/depth/force options as `start`. Every option/root is validated before any submission side effects; all records commit before launches. Results preserve input order, including durable failed children if individual worker startup fails. Read each ID's status; launching a batch is not a transaction over media analysis. One job runs per catalog in enqueue-time/ID FIFO order. Resume keeps original creation time and joins the tail. There is one waiting process per queued job, so submit bounded workloads deliberately rather than treating this as a host-wide admission quota. Windows batch startup may wait for sequential WMI launches (at most 20 seconds per launch); pending records reserve that launch time before their ordinary worker lease.
+
 ## Events and feedback (M6)
 
 `events`, `event ID`, `event-create TITLE`, `event-rename ID TITLE`, `feedback MEDIA_ID [--set JSON|--clear FIELD...|--clear-all]` and `preferences [--set JSON]` all emit JSON. See the [API contract](API.md#events-and-durable-corrections-m6) for full schema details.
@@ -229,4 +232,69 @@ storylens filmcraft --executable /opt/filmcraft/bin/filmcraft-cli transcript \
 Use an actual item ID from editor inspection, never a filename-derived ID. Only schema 15 saved local-file media transcripts are supported. The item's authorized file must match the catalog SHA-256; supplied word ticks/speaker labels are preserved in ordinary transcript results, checked against source coverage, and remain unverified speech evidence. Derived sequence transcript times are not source times and are not imported. Word runs with the same speaker and gaps <=2 seconds become segments without discarding original words. Storyboard, project and transport JSON are bounded to 2 MiB each; discovery/result failures are explicit, never truncated edit plans.
 
 `--request-timeout SECONDS` belongs after `filmcraft` and before its action (default 300 per request); a timeout closes the SDK session and does not automatically retry. Export jobs are editor-owned, not StoryLens durable analysis jobs. The generated-fixture Linux runtime was verified; user review of private holiday media and desktop/cross-platform workflows remain acceptance work.
+
+## Release operation and profiling (M9)
+
+### Isolated collection benchmarks
+
+~~~sh
+# Generated test patterns, random RGB images and tones; no personal files/models:
+storylens benchmark generate /tmp/storylens-fixture --images 1000 --videos 2 --audio 2
+storylens benchmark run /tmp/storylens-fixture \
+  --workspace /local/benchmarks/generated-001 --passes 2 --profile
+# Later, measure an explicitly selected real NAS collection without changing it:
+storylens benchmark run /mounted/media \
+  --workspace /local/benchmarks/nas-001 --stage all --passes 2 --profile
+~~~
+
+Generation requires a new directory with an existing parent. Counts are bounded to 100,000 images and 1,000 each audio/video, with at least one source; square images are 16..4096 pixels and generated clips 1..60 seconds. `--seed` controls pixels, not codec/library implementation: exact source bytes require the same recorded environment. The manifest includes file-relative paths, byte counts and SHA-256 identities. Synthetic data does not evaluate emotional relevance, recognition accuracy or camera/codec fidelity.
+
+Run workspaces must be new and outside the source collection. The command never opens/reuses the configured user catalog: it creates its own catalog and artifacts. `metadata`, `technical` or `all` stages are supported, with 2..10 passes; all configured model inference is disabled. Default full hashing still runs on warm passes. Explicit global `--trust-stat` changes that guarantee and is recorded; do not silently compare it with strict hashing.
+
+`benchmark.json` records actual counters, wall/process-CPU time, parent-process high-water RSS (null if unavailable), throughput, environment and caveats. `--profile` additionally retains pstats files and top cumulative-time functions. Profiles affect timing; RSS is cumulative across passes and excludes subprocesses. Inspect profiles with `python -m pstats /local/benchmarks/generated-001/pass-01.pstats`. **Cold/warm mean catalog state only**: the inventory traverses/stats first, OS/NAS caches are not flushed, and no physical-read bandwidth or distributed/NAS guarantee is inferred. Reports and profiles can reveal paths; protect them like catalogs. Partial media failures remain in each summary, produce a failed report/nonzero exit and are not converted into benchmark success.
+
+### Conservative GPU admission
+
+CUDA audio-model extraction takes one advisory OS file lock before launching the actual inference worker. CPU extraction does not take it. Lock wait and inference each have their own configured audio timeout; a failed wait is explicit, never a CPU fallback. No GPU probe, model download, tensor batching, automatic device selection or claim of GPU capacity is added.
+
+All cooperating catalogs/models/visible-device settings use one `storylens/resources/cuda.lock` under the same user's local cache: Linux `XDG_CACHE_HOME` or `~/.cache`, macOS `~/Library/Caches`, Windows `%LOCALAPPDATA%` or `~/AppData/Local`. Keep that cache local and shared between processes/containers intended to coordinate. Other users/cache roots, hosts and unrelated GPU programs are outside its scope. POSIX directories/file are private; Windows inherits the user-cache ACL. The empty file persists; **do not delete it to break a lock**, since replacing its inode splits ownership. Closing or crashing the owner releases the OS lock automatically. Real GPU inference/performance acceptance remains separate.
+
+### Optional Docker operation
+
+The Dockerfile is a self-hosting recipe, not a published image. Its base digest and direct core versions are pinned; apt/transitive resolution is not a byte-reproducible container lock. It includes Debian FFmpeg, no models, credentials or private media. Runtime defaults to unprivileged UID/GID10001, no listener, and CLI help. Build `--build-arg MCP=1` explicitly for the optional stdio SDK; default `MCP=0` remains core-only.
+
+~~~sh
+docker build -t storylens:0.9.0 .
+mkdir -p /local/storylens-state
+docker run --rm --network none --read-only --cap-drop ALL \
+  --security-opt no-new-privileges --pids-limit 256 \
+  --tmpfs /tmp:rw,noexec,nosuid,size=512m \
+  --user \"$(id -u):$(id -g)\" \
+  --mount type=bind,src=/mounted/media,dst=/media,readonly \
+  --mount type=bind,src=/local/storylens-state,dst=/state \
+  storylens:0.9.0 --database /state/catalog.sqlite3 analyze /media
+~~~
+
+Use real absolute host paths and a state directory writable by the selected UID/GID; Windows/desktop path and user syntax differ. Source writes are denied by the read-only bind mount, not just application policy. Keep all catalog/feedback/jobs/artifact state on the writable local state mount; never place SQLite WAL on a network filesystem. A read-only root plus temporary `/tmp` still permits decoder scratch data, bounded by the chosen tmpfs/process/resource policy. Docker privileges/host mounts/egress remain operator responsibilities.
+
+The example is synchronous. **Container exit stops its detached workers too**: a one-shot `job start` container does not provide host-durable execution. Keep the worker's container alive for durable job workflows, and inspect leases/resume after interruption. Do not claim that a subprocess survives container deletion. Model/GPU-enabled images and a desktop FilmCraft runtime are not bundled or certified here. Before redistributing a built image, review Debian FFmpeg/native notices and corresponding-source obligations in the [release/license guide](RELEASE.md#container-recipe-is-not-a-binary-redistribution-clearance); StoryLens MIT does not relicense those binaries.
+
+### Operational failure matrix
+
+| Condition | Expected behavior / recovery | Evidence boundary |
+| --- | --- | --- |
+| Corrupt/unsupported media | File/stage error; continue unrelated files, retain explicit failure and successful caches | Generated-media regression/smoke |
+| Missing ffprobe/FFmpeg or stage timeout | Explicit stage error; no fabricated analysis; install trusted tools or adjust timeout deliberately | Automated subprocess tests and CLI smoke |
+| SQLite capacity exhausted | Storage error escapes; failed write is not cached, earlier committed evidence survives | Real SQLite `max_page_count` exhaustion; whole-filesystem/inode exhaustion remains acceptance work |
+| Worker/host/container interruption | Lease expires to interrupted; explicit resume reuses committed caches | Actual child-process/lease tests; physical NAS outage/host power loss remains acceptance work |
+| Queued/running cancellation | Distinct requested/terminal states; cooperative boundaries, then process teardown | Automated durable lifecycle tests; terminal state is not a process-exit signal for backup/cleanup |
+| Invalid/private batch root | Reject the whole request before job insertion/launch | CLI/MCP authorization/preflight tests |
+| GPU lock contention/crashed owner | Wait boundedly or fail; OS releases dead owner's lock, never CPU fallback | Independent-process OS-lock tests; CUDA capacity/OOM/driver recovery remains real-hardware work |
+| Changed, missing or unapproved editor source | Reject identity/path/timing or offline placeholders; never silently retarget | Generated-media/root/timing checks; private holiday review deferred |
+| Read-only source deployment | Source bytes remain read-only; all state/derivatives use separate local mounts | Local Linux container smoke; other container hosts remain acceptance work |
+| Incomplete dependency/license closure | Inventory emits issues and nonzero exit; unknown legal evidence is not inferred | Installed-metadata inventory plus cited upstream license review; final binary/native redistribution needs separate approval |
+
+Back up only quiescent state, after workers have actually exited, or use SQLite backup APIs for live individual databases. Include the catalog, `.feedback.sqlite3`, `.jobs.sqlite3` and artifact tree; independent database backups are not a coordinated multi-database snapshot. Retain original read-only media independently. The project does not encrypt backups, collect telemetry, manage model/native licenses or provide a distributed NAS scheduler.
+
+Reproducible wheel/sdist checks, isolated core/MCP installation and a marker/extra-aware dependency/license inventory are documented in [RELEASE.md](RELEASE.md). Private-media review, real NAS/GPU/codec performance and final human release acceptance remain deferred until implementation is complete, as requested.
 

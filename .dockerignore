@@ -1,0 +1,10 @@
+**
+!Dockerfile
+!pyproject.toml
+!README.md
+!LICENSE
+!src/
+!src/storylens/
+!src/storylens/**
+src/storylens/**/__pycache__/
+src/storylens/**/*.pyc

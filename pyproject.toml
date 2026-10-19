@@ -1,14 +1,15 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "storylens"
-version = "0.8.0"
+version = "0.9.0"
 description = "Local-first, read-only media indexing and analysis"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
+license-files = ["LICENSE"]
 dependencies = ["Pillow>=11,<13", "numpy>=1.26,<3"]
 
 [project.optional-dependencies]

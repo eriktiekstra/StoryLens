@@ -33,7 +33,11 @@ def _guard_catalog_writes(catalog, store, job_id, attempt, token, lost):
 
 
 def _claim(store, job_id, attempt):
-    """Wait for the single catalog slot, renewing the queued worker's lease."""
+    """Claim FIFO by queue-entry time (updated_at, id), never race the slot.
+
+    Queued workers renew only their own leases. Expired or cancelled
+    predecessors leave the queue, so an absent worker cannot starve successors.
+    """
     token = uuid.uuid4().hex
     while True:
         with store.connect() as connection:
@@ -42,7 +46,10 @@ def _claim(store, job_id, attempt):
             row = store.row(connection, job_id)
             if row["attempt"] != attempt or row["status"] != "queued":
                 return None
-            if connection.execute("SELECT 1 FROM jobs WHERE status IN ('running','cancel_requested')").fetchone() is None:
+            first = connection.execute("""SELECT id FROM jobs WHERE status='queued'
+                ORDER BY updated_at,id LIMIT 1""").fetchone()
+            if (first["id"] == job_id and
+                    connection.execute("SELECT 1 FROM jobs WHERE status IN ('running','cancel_requested')").fetchone() is None):
                 now = _now()
                 connection.execute("""UPDATE jobs SET status='running',token=?,started_at=?,
                     updated_at=?,heartbeat_at=?,lease_until=?,worker_pid=?

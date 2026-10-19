@@ -11,6 +11,8 @@ import subprocess
 import sys
 import threading
 
+from .resources import cuda_inference_lock
+
 ALGORITHM_VERSION = "audio-models-2"
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_ERROR_BYTES = 256 * 1024
@@ -151,6 +153,18 @@ class AudioModelExtractor:
         return hashlib.sha256(json.dumps(self.provenance(), sort_keys=True).encode()).hexdigest()
 
     def _run_worker(self, wav_path):
+        """Only CUDA inference waits for the shared same-host advisory resource.
+
+        Decoding, provenance and CPU work never take this lock. Lock acquisition
+        and the worker each have the configured timeout independently; no CPU
+        fallback is attempted when either fails.
+        """
+        if self.device == "cuda":
+            with cuda_inference_lock(self.timeout):
+                return self._execute_worker(wav_path)
+        return self._execute_worker(wav_path)
+
+    def _execute_worker(self, wav_path):
         request = json.dumps({"task": self.task, "model_path": str(self.path), "wav_path": str(wav_path),
                               "device": self.device, "language": self.language}).encode()
         env = dict(os.environ, **OFFLINE_ENV)

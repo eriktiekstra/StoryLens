@@ -437,6 +437,24 @@ def create_server(config, roots):
         """Start durable local work and return immediately; later status/result calls survive disconnects."""
         return await invoke(lambda: jobs.start(path, analyze=operation == "analyze", stage=stage, depth=depth, force=force))
 
+    @tool(annotations=write_local)
+    async def start_jobs(paths: Annotated[list[StrictStr], Field(min_length=1, max_length=32)],
+                         operation: Literal["scan", "analyze"] = "analyze",
+                         stage: Literal["metadata", "technical", "semantic", "transcript", "all"] = "all",
+                         depth: Depth | None = None, force: StrictBool = False) -> CallToolResult:
+        """Submit a bounded batch after complete authorization; return every durable ID.
+
+        Jobs execute FIFO in the catalog. Read job_status for full state and any
+        launch errors; a failed child remains a durable, resumable job.
+        """
+        def submit():
+            batch = jobs.start_batch(paths, analyze=operation == "analyze", stage=stage, depth=depth, force=force)
+            items = [{key: row[key] for key in ("id", "status", "attempt")} for row in batch["items"]]
+            return {"schema_version": "1.0", "items": items,
+                    "failed": sum(item["status"] == "failed" for item in items),
+                    "details": "Read job_status for full per-job state and launch errors"}
+        return await invoke(submit)
+
     @tool(annotations=readonly)
     async def job_status(job_id: StrictStr) -> CallToolResult:
         """Read durable state, progress, stage failures and cancellation state."""

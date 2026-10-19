@@ -103,7 +103,10 @@ if ($result['ReturnValue'] -ne 0) { throw "WMI process creation failed: $($resul
             stdin=subprocess.DEVNULL, text=True, capture_output=True,
             env=dict(environment, STORYLENS_WORKER_LAUNCH=request),
             creationflags=subprocess.CREATE_NO_WINDOW, timeout=20)
-        if result.returncode or not isinstance(json.loads(result.stdout), int):
+        if result.returncode:
+            raise ValueError(result.stderr[-2000:] or "WMI worker launch failed")
+        pid = json.loads(result.stdout)
+        if type(pid) is not int or pid <= 0:
             raise ValueError(result.stderr[-2000:] or "Missing WMI process ID")
     except subprocess.TimeoutExpired as error:
         details = (error.stderr or b"")
@@ -112,6 +115,7 @@ if ($result['ReturnValue'] -ne 0) { throw "WMI process creation failed: $($resul
         raise OSError("Windows worker launch exceeded its 20-second timeout: " + details[-2000:]) from error
     except (OSError, ValueError) as error:
         raise OSError("Cannot launch independent Windows worker through local PowerShell/WMI: " + str(error)[:2000]) from error
+    return pid
 
 
 def _config_document(config):
@@ -149,6 +153,8 @@ class _Store:
                     summary TEXT, error TEXT, worker_pid INTEGER);
                 CREATE UNIQUE INDEX IF NOT EXISTS one_running_job
                     ON jobs((1)) WHERE status IN ('running', 'cancel_requested');
+                CREATE INDEX IF NOT EXISTS queued_jobs_fifo
+                    ON jobs(updated_at,id) WHERE status='queued';
                 PRAGMA user_version=1;
             """)
 
@@ -199,44 +205,94 @@ class JobManager:
         if str(self.policy.authorize(Path(row["root"]))) != row["root"]:
             raise ValueError("Job root changed since submission")
 
-    def start(self, path, *, analyze=True, stage="all", depth=None, force=False):
-        root = self.policy.authorize(Path(path))
+    @staticmethod
+    def _request(*, analyze, stage, depth, force, config):
         if type(analyze) is not bool or type(force) is not bool:
             raise ValueError("analyze and force must be booleans")
-        if stage not in {"metadata", "technical", "semantic", "transcript", "all"}:
+        if not isinstance(stage, str) or stage not in {"metadata", "technical", "semantic", "transcript", "all"}:
             raise ValueError("stage must be metadata, technical, semantic, transcript or all")
-        if depth not in (None, "fast", "standard", "deep"):
+        if depth is not None and (not isinstance(depth, str) or depth not in ("fast", "standard", "deep")):
             raise ValueError("depth must be fast, standard or deep")
         if depth is not None and stage not in {"semantic", "all"}:
             raise ValueError("depth applies only to semantic or all stages")
-        if analyze and stage == "transcript" and not self.config.audio_transcription_model:
+        if analyze and stage == "transcript" and not config.audio_transcription_model:
             raise ValueError("audio_transcription_model is required for transcript stage")
-        request = {"analyze": analyze, "stage": stage, "depth": depth, "force": force}
-        job_id, now = uuid.uuid4().hex, _now()
+        return {"analyze": analyze, "stage": stage, "depth": depth, "force": force}
+
+    def _submit(self, roots, request):
+        """Commit every record before launching any detached worker."""
+        jobs = [(uuid.uuid4().hex, root, _now()) for root in roots]
+        config = json.dumps(_config_document(self.config))
+        authorized = json.dumps([str(root) for root in self.policy.roots])
         with self.store.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             self.store.expire(connection)
-            connection.execute("""INSERT INTO jobs
+            connection.executemany("""INSERT INTO jobs
                 (id,root,config,roots,request,status,created_at,updated_at,lease_until,attempt)
                 VALUES(?,?,?,?,?,'queued',?,?,?,1)""",
-                (job_id, str(root), json.dumps(_config_document(self.config)),
-                 json.dumps([str(root) for root in self.policy.roots]), json.dumps(request),
-                 now, now, time.time() + LEASE_SECONDS))
+                [(job_id, str(root), config, authorized, json.dumps(request),
+                  now, now, time.time() + LEASE_SECONDS + (20 * index if os.name == "nt" else 0))
+                 for index, (job_id, root, now) in enumerate(jobs)])
+        return [job_id for job_id, _, _ in jobs]
+
+    def start(self, path, *, analyze=True, stage="all", depth=None, force=False):
+        request = self._request(analyze=analyze, stage=stage, depth=depth, force=force,
+                                config=self.config)
+        root = self.policy.authorize(Path(path))
+        job_id, = self._submit([root], request)
         self._launch(job_id, 1)
         return self.status(job_id)
+
+    def start_batch(self, paths, *, analyze=True, stage="all", depth=None, force=False):
+        """Submit 1..32 explicit paths atomically, then launch one worker per job.
+
+        Validation has no submission side effects. Launch failures are durable
+        failed jobs in the returned input-order items, not a lost partial batch;
+        other launches continue. Catalog stage writes remain single-worker.
+        """
+        if not isinstance(paths, (list, tuple)) or not 1 <= len(paths) <= 32:
+            raise ValueError("paths must contain between 1 and 32 explicit paths")
+        request = self._request(analyze=analyze, stage=stage, depth=depth, force=force,
+                                config=self.config)
+        roots = []
+        for path in paths:
+            if not isinstance(path, (str, Path)) or not str(path).strip():
+                raise ValueError("Each batch path must be an explicit nonempty path")
+            roots.append(self.policy.authorize(Path(path)))
+        if len(set(roots)) != len(roots):
+            raise ValueError("Batch paths must have distinct canonical roots")
+        job_ids = self._submit(roots, request)
+        for job_id in job_ids:
+            try:
+                self._launch(job_id, 1)
+            except OSError:
+                # _launch records the error before raising, preserving every ID.
+                continue
+        return {"schema_version": "1.0", "items": [self.status(job_id) for job_id in job_ids]}
 
     def _launch(self, job_id, attempt):
         command = [sys.executable, "-m", "storylens.job_worker",
                    str(self.store.path), job_id, str(attempt)]
         environment = _worker_environment()
+        # Reserve sequential WMI launch time for not-yet-launched batch jobs.
+        # Once launching, the normal queued-worker heartbeat deadline applies.
+        with self.store.connect() as connection:
+            connection.execute("""UPDATE jobs SET lease_until=?
+                WHERE id=? AND attempt=? AND status='queued'""",
+                (time.time() + LEASE_SECONDS, job_id, attempt))
         try:
             if os.name == "nt":
-                _launch_windows(command, environment, Path.cwd())
+                pid = _launch_windows(command, environment, Path.cwd())
             else:
                 process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
                     env=environment, start_new_session=True)
                 # Reap without waiting for work or retaining transport pipes.
                 threading.Thread(target=process.wait, daemon=True).start()
+                pid = process.pid
+            with self.store.connect() as connection:
+                connection.execute("""UPDATE jobs SET worker_pid=?
+                    WHERE id=? AND attempt=? AND worker_pid IS NULL""", (pid, job_id, attempt))
         except OSError as error:
             with self.store.connect() as connection:
                 connection.execute("""UPDATE jobs SET status='failed',error=?,finished_at=?,updated_at=?
@@ -280,10 +336,12 @@ class JobManager:
             if row["status"] not in {"interrupted", "cancelled", "failed"}:
                 raise ValueError("Only interrupted, cancelled or failed jobs may be resumed")
             attempt = row["attempt"] + 1
+            now = _now()
+            # updated_at is the stable queue-entry time until this attempt runs.
             connection.execute("""UPDATE jobs SET status='queued',attempt=?,token=NULL,
                 updated_at=?,started_at=NULL,finished_at=NULL,heartbeat_at=NULL,
                 lease_until=?,error=NULL,worker_pid=NULL WHERE id=?""",
-                (attempt, _now(), time.time() + LEASE_SECONDS, job_id))
+                (attempt, now, time.time() + LEASE_SECONDS, job_id))
         self._launch(job_id, attempt)
         return self.status(job_id)
 

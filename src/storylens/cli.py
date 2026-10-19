@@ -12,7 +12,8 @@ from .service import Analyzer
 
 
 def parser():
-    cli = argparse.ArgumentParser(prog="storylens", description="StoryLens: local media analysis and semantic retrieval")
+    cli = argparse.ArgumentParser(prog="storylens", allow_abbrev=False,
+                                  description="StoryLens: local media analysis and semantic retrieval")
     cli.add_argument("--version", action="version", version=__version__)
     cli.add_argument("--config", type=Path, help="TOML configuration file")
     cli.add_argument("--database", type=Path, help="Local SQLite catalog path")
@@ -79,6 +80,12 @@ def parser():
     start.add_argument("--force", action="store_true")
     start.add_argument("--stage", choices=("metadata", "technical", "semantic", "transcript", "all"), default="all")
     start.add_argument("--depth", choices=("fast", "standard", "deep"))
+    batch = actions.add_parser("batch", help="Submit 1..32 roots as durable FIFO jobs")
+    batch.add_argument("paths", nargs="+", type=Path)
+    batch.add_argument("--scan", action="store_true", help="Index only, without analysis")
+    batch.add_argument("--force", action="store_true")
+    batch.add_argument("--stage", choices=("metadata", "technical", "semantic", "transcript", "all"), default="all")
+    batch.add_argument("--depth", choices=("fast", "standard", "deep"))
     for action in ("status", "cancel", "resume", "result"):
         actions.add_parser(action).add_argument("job_id")
     jobs = actions.add_parser("list")
@@ -141,6 +148,22 @@ def parser():
     for action in (create, actions.choices["preview"], actions.choices["export"], transcript):
         action.add_argument("--allow-root", action="append", required=True, type=Path)
         action.add_argument("--approve", action="store_true", help="Approve the reviewed write/import; never overwrite")
+    benchmark = commands.add_parser("benchmark", help="Generate fixtures or measure isolated cold/warm catalog passes")
+    actions = benchmark.add_subparsers(dest="action", required=True)
+    fixture = actions.add_parser("generate", help="Generate redistributable media in a new directory")
+    fixture.add_argument("output", type=Path)
+    fixture.add_argument("--images", type=int, default=1000)
+    fixture.add_argument("--videos", type=int, default=2)
+    fixture.add_argument("--audio", type=int, default=2)
+    fixture.add_argument("--image-size", type=int, default=256)
+    fixture.add_argument("--seconds", type=int, default=2)
+    fixture.add_argument("--seed", type=int, default=0)
+    measure = actions.add_parser("run", help="Measure model-free stages using a new local workspace/catalog")
+    measure.add_argument("path", type=Path)
+    measure.add_argument("--workspace", required=True, type=Path)
+    measure.add_argument("--stage", choices=("metadata", "technical", "all"), default="all")
+    measure.add_argument("--passes", type=int, default=2)
+    measure.add_argument("--profile", action="store_true", help="Save per-pass cProfile data and hotspot summaries")
     return cli
 
 
@@ -172,6 +195,17 @@ def main(argv=None):
                              ollama_endpoint=args.ollama_endpoint, semantic_timeout=args.semantic_timeout,
                              max_audio_seconds=args.max_audio_seconds, audio_transcription_model=args.audio_transcription_model,
                              audio_transcription_device=args.audio_transcription_device, audio_transcription_language=args.audio_transcription_language)
+        if args.command == "benchmark":
+            from . import benchmark
+            if args.action == "generate":
+                result = benchmark.generate(args.output, images=args.images, videos=args.videos, audio=args.audio,
+                    image_size=args.image_size, seconds=args.seconds, seed=args.seed,
+                    ffmpeg=config.ffmpeg, timeout=config.timeout)
+            else:
+                result = benchmark.run(config, args.path, workspace=args.workspace, stage=args.stage,
+                                       passes=args.passes, profile=args.profile)
+            emit(result, True)
+            return 2 if result.get("failed") else 0
         if args.command == "filmcraft":
             import asyncio
             from .filmcraft_transport import FilmCraft
@@ -212,12 +246,16 @@ def main(argv=None):
             if args.action == "start":
                 result = manager.start(args.path, analyze=not args.scan, stage=args.stage,
                                        depth=args.depth, force=args.force)
+            elif args.action == "batch":
+                result = manager.start_batch(args.paths, analyze=not args.scan, stage=args.stage,
+                                             depth=args.depth, force=args.force)
             elif args.action == "list":
                 result = manager.list(limit=args.limit, after=args.after)
             else:
                 result = getattr(manager, args.action)(args.job_id)
             emit(result, True)
-            return 2 if result.get("status") == "failed" else 0
+            return 2 if result.get("status") == "failed" or any(
+                item.get("status") == "failed" for item in result.get("items", [])) else 0
         with Analyzer(config) as storylens:
             if args.command in ("scan", "analyze"):
                 result = storylens.scan(args.path, analyze=args.command == "analyze", force=getattr(args, "force", False),

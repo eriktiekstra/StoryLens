@@ -20,7 +20,7 @@ from PIL import Image
 
 from storylens.config import Config
 from storylens.jobs import JobCancelled, JobManager, _summary, _worker_environment
-from storylens.job_worker import _guard_catalog_writes
+from storylens.job_worker import _claim, _finish, _guard_catalog_writes
 from storylens.storage import Catalog
 
 
@@ -36,6 +36,23 @@ class JobTests(unittest.TestCase):
         self.media.mkdir()
         self.config = Config(self.root / "catalog.sqlite3")
         self.manager = JobManager(self.config, [self.media])
+        self.worker_pids = set()
+        self.worker_lock = threading.Lock()
+        launch = JobManager._launch
+
+        def tracked_launch(manager, job_id, attempt):
+            try:
+                return launch(manager, job_id, attempt)
+            finally:
+                with manager.store.connect() as connection:
+                    pid = manager.store.row(connection, job_id)["worker_pid"]
+                if pid is not None:
+                    with self.worker_lock:
+                        self.worker_pids.add(pid)
+
+        launcher = patch.object(JobManager, "_launch", autospec=True, side_effect=tracked_launch)
+        launcher.start()
+        self.addCleanup(launcher.stop)
         self.addCleanup(self.stop_workers)
 
     def stop_workers(self):
@@ -48,6 +65,49 @@ class JobTests(unittest.TestCase):
             time.sleep(0.05)
             with self.manager.store.connect() as connection:
                 rows = connection.execute("SELECT id FROM jobs WHERE status IN ('queued','running','cancel_requested')").fetchall()
+        self.assertFalse(rows, "Workers did not acknowledge cancellation")
+        with self.manager.store.connect() as connection:
+            # Also include workers launched by the independent submitter fixture.
+            self.worker_pids.update(row[0] for row in connection.execute(
+                "SELECT worker_pid FROM jobs WHERE worker_pid IS NOT NULL")
+                if row[0] != os.getpid())
+        # Durable terminal state precedes process teardown. In particular, a
+        # cancelled queued worker can still be waking up to read SQLite.
+        # Wait for actual process exit before removing the database on Windows.
+        for pid in self.worker_pids:
+            self.wait_worker_exit(pid)
+
+    def wait_worker_exit(self, pid):
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+            kernel.WaitForSingleObject.restype = wintypes.DWORD
+            kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+            kernel.CloseHandle.restype = wintypes.BOOL
+            handle = kernel.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+            if not handle:
+                error = ctypes.get_last_error()
+                if error == 87:  # Process has already exited.
+                    return
+                raise ctypes.WinError(error)
+            try:
+                self.assertEqual(kernel.WaitForSingleObject(handle, 10_000), 0,
+                                 f"Detached worker {pid} did not exit")
+            finally:
+                kernel.CloseHandle(handle)
+        else:
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    return
+                time.sleep(0.02)
+            self.fail(f"Detached worker {pid} did not exit")
 
     def images(self, count=1, size=(128, 96)):
         for index in range(count):
@@ -296,6 +356,132 @@ print(json.dumps(manager.start(Path(sys.argv[2]))),flush=True)
         self.assertEqual(catalog.get(media_id)["failures"], [])
         with self.manager.store.connect() as connection:
             connection.execute("UPDATE jobs SET status='cancelled',token=NULL WHERE id=?", (job_id,))
+
+
+    def test_batch_preflight_has_no_submission_side_effects(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        malformed = [
+            ([], {}), ([self.media] * 33, {}), (str(self.media), {}),
+            ([self.media, self.media / "."], {}),
+            ([self.media, outside], {}), ([self.media, self.root / "missing"], {}),
+            ([self.media, True], {}), ([self.media, ""], {}),
+            ([self.media], {"analyze": 1}), ([self.media], {"force": "false"}),
+            ([self.media], {"stage": []}), ([self.media], {"depth": False}),
+            ([self.media], {"stage": "technical", "depth": "deep"}),
+            ([self.media], {"stage": "transcript"}),
+        ]
+        with patch.object(self.manager, "_launch") as launch:
+            for paths, options in malformed:
+                with self.subTest(paths=paths, options=options):
+                    with self.assertRaises((ValueError, FileNotFoundError)):
+                        self.manager.start_batch(paths, **options)
+                    self.assertEqual(self.manager.list()["items"], [])
+            launch.assert_not_called()
+        self.assertFalse(self.config.database.exists())
+
+    def test_batch_bounds_and_complete_records_before_first_launch(self):
+        paths = []
+        for index in range(32):
+            path = self.media / str(index)
+            path.mkdir()
+            paths.append(path)
+        observed = []
+        def inspect(job_id, attempt):
+            items = self.manager.list()["items"]
+            self.assertEqual(len(items), 32)
+            self.assertTrue(all(item["status"] == "queued" for item in items))
+            observed.append(job_id)
+        with patch.object(self.manager, "_launch", side_effect=inspect):
+            batch = self.manager.start_batch(paths, analyze=False)
+        self.assertEqual(batch["schema_version"], "1.0")
+        self.assertEqual(len(batch["items"]), 32)
+        self.assertEqual([item["root"] for item in batch["items"]], [str(path) for path in paths])
+        self.assertEqual(observed, [item["id"] for item in batch["items"]])
+        independent = JobManager(self.config, [self.media])
+        self.assertEqual({item["id"] for item in independent.list()["items"]}, set(observed))
+
+    def test_batch_launch_failure_is_durable_and_other_jobs_execute(self):
+        paths = [self.media / name for name in ("failed", "successful")]
+        for path in paths:
+            path.mkdir()
+        real_launch = self.manager._launch
+        def launch(job_id, attempt):
+            if self.manager.status(job_id)["root"] == str(paths[0]):
+                target = ("storylens.jobs._launch_windows" if os.name == "nt"
+                          else "storylens.jobs.subprocess.Popen")
+                with patch(target, side_effect=OSError("launch denied")):
+                    return real_launch(job_id, attempt)
+            return real_launch(job_id, attempt)
+        with patch.object(self.manager, "_launch", side_effect=launch):
+            batch = self.manager.start_batch(paths, analyze=False)
+        first, second = batch["items"]
+        self.assertEqual(first["status"], "failed")
+        self.assertIn("launch denied", first["error"])
+        self.assertIsNotNone(first["finished_at"])
+        self.assertEqual(self.wait_for(second["id"])["status"], "succeeded")
+        independent = JobManager(self.config, [self.media])
+        self.assertEqual(independent.result(first["id"])["status"], "failed")
+        with patch("storylens.jobs._launch_windows" if os.name == "nt"
+                   else "storylens.jobs.subprocess.Popen", side_effect=OSError("single launch denied")):
+            with self.assertRaisesRegex(OSError, "single launch denied"):
+                self.manager.start(paths[0], analyze=False)
+        self.assertEqual(sum(item["status"] == "failed" for item in independent.list()["items"]), 2)
+
+    def test_fifo_claim_cannot_overtake_older_queued_job(self):
+        with patch.object(self.manager, "_launch"):
+            first = self.manager.start(self.media, analyze=False)
+            second = self.manager.start(self.media, analyze=False)
+        # Same timestamp exercises the deterministic ID tie-breaker.
+        with self.manager.store.connect() as connection:
+            connection.execute("UPDATE jobs SET created_at='2020',updated_at='2020'")
+        older, later = sorted((first["id"], second["id"]))
+        waits = []
+        def release_first(_):
+            waits.append(True)
+            self.assertEqual(self.manager.status(later)["status"], "queued")
+            token = _claim(self.manager.store, older, 1)
+            self.assertIsNotNone(token)
+            _finish(self.manager.store, older, token, "succeeded")
+        with patch("storylens.job_worker.time.sleep", side_effect=release_first):
+            token = _claim(self.manager.store, later, 1)
+        self.assertEqual(len(waits), 1)
+        self.assertIsNotNone(token)
+        _finish(self.manager.store, later, token, "succeeded")
+
+    def test_fifo_cancelled_and_expired_predecessors_do_not_starve(self):
+        with patch.object(self.manager, "_launch"):
+            cancelled = self.manager.start(self.media, analyze=False)
+            expired = self.manager.start(self.media, analyze=False)
+            ready = self.manager.start(self.media, analyze=False)
+        self.manager.cancel(cancelled["id"])
+        with self.manager.store.connect() as connection:
+            connection.execute("UPDATE jobs SET lease_until=0 WHERE id=?", (expired["id"],))
+        token = _claim(self.manager.store, ready["id"], 1)
+        self.assertIsNotNone(token)
+        self.assertEqual(self.manager.status(expired["id"])["status"], "interrupted")
+        self.assertIsNone(_claim(self.manager.store, cancelled["id"], 1))
+        _finish(self.manager.store, ready["id"], token, "succeeded")
+
+    def test_resumed_attempt_joins_queue_tail_without_changing_creation(self):
+        with patch.object(self.manager, "_launch"):
+            old = self.manager.start(self.media, analyze=False)
+            self.manager.cancel(old["id"])
+            waiting = self.manager.start(self.media, analyze=False)
+            resumed = self.manager.resume(old["id"])
+        self.assertEqual(resumed["created_at"], old["created_at"])
+        self.assertEqual(resumed["attempt"], 2)
+        waits = []
+        def release_waiting(_):
+            waits.append(True)
+            token = _claim(self.manager.store, waiting["id"], 1)
+            self.assertIsNotNone(token)
+            _finish(self.manager.store, waiting["id"], token, "succeeded")
+        with patch("storylens.job_worker.time.sleep", side_effect=release_waiting):
+            token = _claim(self.manager.store, old["id"], 2)
+        self.assertEqual(len(waits), 1)
+        self.assertIsNotNone(token)
+        _finish(self.manager.store, old["id"], token, "succeeded")
 
 if __name__ == "__main__":
     unittest.main()
