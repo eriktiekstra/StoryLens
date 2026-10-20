@@ -73,6 +73,18 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(result["counts"]["video"], 0)
         self.assertFalse(result["errors"])
 
+    def test_preflight_discloses_missing_heif_decoder_and_saved_video_timeout(self):
+        (self.source / "phone.heic").write_bytes(b"decoder not needed for preflight")
+        (self.source / "large.mov").write_bytes(b"codec not needed for preflight")
+        config = Config(self.config.database, ffmpeg="ffmpeg", ffprobe="ffprobe", timeout=180)
+        with patch("storylens.workflow.importlib.util.find_spec", return_value=None):
+            result = preflight(self.source, config)
+        warnings = "\n".join(result["warnings"])
+        self.assertIn("1 HEIC/HEIF files detected", warnings)
+        self.assertIn("python -m pip install 'pillow-heif>=1,<2'", warnings)
+        self.assertIn("180s", warnings)
+        self.assertIn("Existing projects retain their saved timeout", warnings)
+
     def test_preflight_rejects_empty_missing_traversal_and_oversized_collections(self):
         empty = self.root / "empty"
         empty.mkdir()

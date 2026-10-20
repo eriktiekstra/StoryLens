@@ -12,6 +12,7 @@ storylens wizard --project "$HOME/storylens-projects/holiday"
 ~~~
 
 The wizard chooses a mixed-media source folder and an independent local project directory, checks recognized sources and required tools, confirms analysis, shows actual checkpoint counts, asks for target film duration/strategy, and guides storyboard review. Keep the project directory local and outside the source folder, especially when media is on a NAS. A new project never adopts the global catalog or overwrites an unrelated existing directory.
+Preflight checks extensions and installed optional decoder availability. If HEIC/HEIF files are present without `pillow-heif`, it displays the exact install command before analysis; those files otherwise fail metadata and image analysis. Install the package into the same Python environment that provides `storylens`, then create a fresh project or run cached reanalysis. Existing video/audio projects display their saved per-tool timeout; set `STORYLENS_TIMEOUT=180` (or another positive value) before creating a project to allow slower/longer media enough time. Reopening an existing project deliberately retains its saved timeout.
 
 Technical-only is the default **even if configured model paths exist**. Explicit local-AI mode uses installed/configured local models and selected fast/standard/deep coverage; there are no automatic downloads, cloud fallbacks or fabricated captions. Optional transcription follows current core support for standalone audio, not automatic speech extraction from videos. Tool/model configuration can be supplied with ordinary global options or `--config`; the guided mode discloses the selected runtime before analysis.
 
@@ -101,7 +102,7 @@ Extension discovery is an allowlist, not proof of decoder support. Unknown exten
 | Media | Implemented behavior |
 | --- | --- |
 | JPEG, PNG, WebP, TIFF, BMP, GIF, AVIF | Pillow metadata and first-frame image technical analysis, subject to installed codec support |
-| HEIC/HEIF | Recognized; optional pillow-heif required; unsupported decoding fails per file; no HDR fidelity guarantee |
+| HEIC/HEIF | Recognized; optional `pillow-heif` required and preflight-warned when absent; unsupported decoding fails per file; no HDR fidelity guarantee |
 | DNG, CR2/CR3, NEF, ARW, ORF, RW2, RAF | Identity indexing guaranteed; extraction can fail with unsupported decoder. Full RAW awaits optional ExifTool/LibRaw work |
 | MP4, MOV, MKV, AVI, M4V, WebM, MTS/M2TS, 3GP, MPG/MPEG | ffprobe metadata plus FFmpeg technical analysis, codec/filter/build dependent |
 | MP3, AAC, WAV, FLAC, M4A, OGG, Opus, AIFF/AIF, WMA | ffprobe metadata; bounded standalone signal/silence analysis; optional local transcription |

@@ -21,7 +21,7 @@ storylens --help
 
 Windows PowerShell: use py -3 -m venv .venv, then .venv\Scripts\Activate.ps1 and the same pip commands. If Linux venv reports missing ensurepip, install your distribution's Python venv package. No PyPI release or signed desktop installer is claimed yet.
 
-Optional HEIF support: python -m pip install -e '.[heif]'. Native codecs and camera support vary; see [formats](docs/USAGE.md#media-support).
+Optional HEIF support: `python -m pip install -e '.[heif]'` from a checkout, or `python -m pip install 'pillow-heif>=1,<2>'` in the installed StoryLens environment. The wizard warns before analysis when it detects HEIC/HEIF files without this decoder. The wizard also shows the project's saved external-tool timeout; set `STORYLENS_TIMEOUT` before creating a project to increase it for large/slow videos. See [formats](docs/USAGE.md#media-support).
 
 ## Quick start
 

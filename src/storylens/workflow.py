@@ -8,6 +8,7 @@ review and editor boundaries. Opening a project never launches an external tool.
 from copy import deepcopy
 from dataclasses import asdict, fields
 import fnmatch
+import importlib.util
 import hashlib
 import json
 import math
@@ -140,6 +141,7 @@ def preflight(source: Path, config: Config, *, mode="technical", depth="fast") -
     result = {"counts": {"image": 0, "video": 0, "audio": 0},
               "tools": {"ffmpeg": shutil.which(config.ffmpeg), "ffprobe": shutil.which(config.ffprobe)},
               "errors": [], "warnings": []}
+    heif_files = 0
     try:
         source = Path(source).expanduser().resolve(strict=True)
         if not source.is_dir():
@@ -149,6 +151,8 @@ def preflight(source: Path, config: Config, *, mode="technical", depth="fast") -
                 if len(result["errors"]) < 100:
                     result["errors"].append("Source traversal failed: " + str(entry))
                 continue
+            if isinstance(entry, Path) and entry.suffix.lower() in {".heic", ".heif"}:
+                heif_files += 1
             result["counts"][kind(entry)] += 1
             if sum(result["counts"].values()) > MAX_MEDIA:
                 result["errors"].append("Projects support at most 10000 current media files")
@@ -163,6 +167,19 @@ def preflight(source: Path, config: Config, *, mode="technical", depth="fast") -
             if executable is None:
                 result["errors"].append(name + " is required for audio/video analysis")
         result["warnings"].append("Tool availability does not certify GPU support or media codecs.")
+    if heif_files:
+        try:
+            heif_installed = importlib.util.find_spec("pillow_heif") is not None
+        except (ImportError, ValueError):
+            heif_installed = False
+        if not heif_installed:
+            result["warnings"].append(
+                f"{heif_files} HEIC/HEIF files detected; install pillow-heif in this Python environment "
+                "to decode them: python -m pip install 'pillow-heif>=1,<2'. Otherwise those files will fail analysis.")
+    if counts["video"] or counts["audio"]:
+        result["warnings"].append(
+            f"External-tool timeout for this project: {config.timeout:g}s. Large/complex videos may exceed it; "
+            "set STORYLENS_TIMEOUT before creating a project. Existing projects retain their saved timeout.")
     if mode == "local-ai":
         if counts["image"] or counts["video"]:
             model = Path(config.embedding_model).expanduser() if config.embedding_model else None

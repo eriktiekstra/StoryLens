@@ -78,6 +78,20 @@ class WizardTests(unittest.TestCase):
         self.assertIsNone(project.state["approved_hash"])
         self.assertFalse(self.config.database.exists())
 
+    def test_preflight_warns_about_detected_heif_before_analysis_consent(self):
+        (self.source / "phone.heic").write_bytes(b"preflight only; no decode")
+        output = Terminal()
+        with patch("storylens.workflow.importlib.util.find_spec", return_value=None):
+            with patch("sys.stdin", Terminal("\nn\n")), patch("sys.stdout", output):
+                code = wizard.run(self.config, project=self.directory, source=self.source)
+        self.assertEqual(code, 0)
+        message = output.getvalue()
+        warning = message.index("HEIC/HEIF files detected")
+        consent = message.index("Start analysis using these options?")
+        self.assertLess(warning, consent)
+        self.assertIn("pillow-heif", message)
+        self.assertEqual(Project.open(self.directory).state["analysis"]["status"], "not_started")
+
     def test_invalid_duration_is_reprompted_without_silent_coercion(self):
         code, output = self.run_wizard("\ny\nnan\n-3\n0\ninfinity\n8\n\nq\n",
                                       project=self.directory, source=self.source)
@@ -85,6 +99,7 @@ class WizardTests(unittest.TestCase):
         self.assertEqual(Project.open(self.directory).load_storyboard()["duration_seconds"], 8)
 
     def test_interruption_preserves_existing_storyboard_without_reanalysis(self):
+
         project, document = self.project()
         path = project.document_path
         before = path.read_bytes()
