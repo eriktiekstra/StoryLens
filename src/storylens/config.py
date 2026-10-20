@@ -10,7 +10,7 @@ import tomllib
 
 def default_database() -> Path:
     if sys.platform == "win32":
-        root = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
+        root = Path(os.environ["LOCALAPPDATA"]) if os.environ.get("LOCALAPPDATA") else Path.home() / "AppData/Local"
     elif sys.platform == "darwin":
         root = Path.home() / "Library/Application Support"
     else:
