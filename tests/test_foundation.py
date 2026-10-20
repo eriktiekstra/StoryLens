@@ -153,6 +153,9 @@ class FoundationTests(unittest.TestCase):
                 app.catalog.page(501)
 
     def test_configuration_precedence_and_invalid_values(self):
+        self.assertEqual(Config(self.base / "defaults.sqlite3").timeout, 600)
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(load_config().timeout, 600)
         config = self.base / "config.toml"
         config.write_text('[storylens]\ndatabase="' + (self.base / "catalog.sqlite3").as_posix() +
                          '"\ntimeout=5\nexclusions=["private"]\n')

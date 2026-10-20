@@ -31,7 +31,7 @@ def json_value(value):
 
 
 class MetadataExtractor:
-    def __init__(self, executable="ffprobe", timeout=30):
+    def __init__(self, executable="ffprobe", timeout=600):
         self.executable = executable
         self.timeout = timeout
         self._probe_version = None

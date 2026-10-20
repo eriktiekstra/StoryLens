@@ -22,7 +22,7 @@ def default_database() -> Path:
 class Config:
     database: Path
     ffprobe: str = "ffprobe"
-    timeout: float = 30.0
+    timeout: float = 600.0
     exclusions: tuple[str, ...] = ()
     trust_stat: bool = False
     ffmpeg: str = "ffmpeg"
@@ -73,7 +73,7 @@ def load_config(path: Path | None = None, **overrides) -> Config:
     exclusions = values.get("exclusions", ())
     if not isinstance(exclusions, (list, tuple)) or not all(isinstance(x, str) for x in exclusions):
         raise ValueError("exclusions must be an array of patterns")
-    timeout = values.get("timeout", 30.0)
+    timeout = values.get("timeout", 600.0)
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("timeout must be a finite positive number")
     for executable in ("ffprobe", "ffmpeg"):

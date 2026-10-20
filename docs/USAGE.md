@@ -12,7 +12,7 @@ storylens wizard --project "$HOME/storylens-projects/holiday"
 ~~~
 
 The wizard chooses a mixed-media source folder and an independent local project directory, checks recognized sources and required tools, confirms analysis, shows actual checkpoint counts, asks for target film duration/strategy, and guides storyboard review. Keep the project directory local and outside the source folder, especially when media is on a NAS. A new project never adopts the global catalog or overwrites an unrelated existing directory.
-Preflight checks extensions and installed optional decoder availability. If HEIC/HEIF files are present without `pillow-heif`, it displays the exact install command before analysis; those files otherwise fail metadata and image analysis. Install the package into the same Python environment that provides `storylens`, then create a fresh project or run cached reanalysis. Existing video/audio projects display their saved per-tool timeout; set `STORYLENS_TIMEOUT=180` (or another positive value) before creating a project to allow slower/longer media enough time. Reopening an existing project deliberately retains its saved timeout.
+Preflight checks extensions and installed optional decoder availability. If HEIC/HEIF files are present without `pillow-heif`, it displays the exact install command before analysis; those files otherwise fail metadata and image analysis. Install the package into the same Python environment that provides `storylens`, then create a fresh project or run cached reanalysis. The default per-tool timeout is 600 seconds; existing video/audio projects display their saved timeout. Set `STORYLENS_TIMEOUT` before creating a project to choose a different value; reopening deliberately retains the project's saved timeout.
 
 Technical-only is the default **even if configured model paths exist**. Explicit local-AI mode uses installed/configured local models and selected fast/standard/deep coverage; there are no automatic downloads, cloud fallbacks or fabricated captions. Optional transcription follows current core support for standalone audio, not automatic speech extraction from videos. Tool/model configuration can be supplied with ordinary global options or `--config`; the guided mode discloses the selected runtime before analysis.
 
@@ -73,7 +73,7 @@ No config is loaded implicitly. Supply --config. Precedence: defaults < TOML < e
 database = "/absolute/local/path/catalog.sqlite3"
 ffprobe = "ffprobe"
 ffmpeg = "ffmpeg"
-timeout = 30.0
+timeout = 600.0 # per ffprobe/ffmpeg subprocess; override for slower/shorter workloads
 scene_threshold = 0.3
 minimum_scene_seconds = 0.5
 max_scenes = 256

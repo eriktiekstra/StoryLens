@@ -34,7 +34,7 @@ def _rational(value):
 
 
 class VideoTechnicalExtractor:
-    def __init__(self, ffmpeg="ffmpeg", ffprobe="ffprobe", timeout=30,
+    def __init__(self, ffmpeg="ffmpeg", ffprobe="ffprobe", timeout=600,
                  scene_threshold=0.3, minimum_scene_seconds=0.5, *, max_scenes=256):
         if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError("timeout must be finite and positive")

@@ -22,7 +22,7 @@ def parser():
     cli.add_argument("--scene-threshold", type=float, help="Scene change sensitivity (0,1]")
     cli.add_argument("--minimum-scene-seconds", type=float, help="Minimum gap between candidate cuts")
     cli.add_argument("--max-scenes", type=int, help="Explicit per-video scene/artifact safety limit")
-    cli.add_argument("--timeout", type=float, help="Per-subprocess timeout in seconds")
+    cli.add_argument("--timeout", type=float, help="Per-subprocess timeout in seconds (default: 600)")
     cli.add_argument("--embedding-model", help="Installed local Transformers CLIP/SigLIP model directory")
     cli.add_argument("--vision-model", help="Installed local Ollama vision model")
     cli.add_argument("--ollama-endpoint", help="Numeric loopback Ollama URL")

@@ -26,7 +26,7 @@ MINIMUM_SILENCE_SECONDS = 0.1
 
 
 class AudioTechnicalExtractor:
-    def __init__(self, ffmpeg="ffmpeg", ffprobe="ffprobe", timeout=30, max_audio_seconds=1800):
+    def __init__(self, ffmpeg="ffmpeg", ffprobe="ffprobe", timeout=600, max_audio_seconds=1800):
         if isinstance(max_audio_seconds, bool) or not math.isfinite(max_audio_seconds) or max_audio_seconds <= 0:
             raise ValueError("max_audio_seconds must be finite and positive")
         self.ffmpeg, self.ffprobe = ffmpeg, ffprobe
@@ -239,7 +239,7 @@ class AudioTechnicalExtractor:
 
 
 @contextmanager
-def decoded_audio(path, ffmpeg="ffmpeg", ffprobe="ffprobe", timeout=30, max_audio_seconds=1800):
+def decoded_audio(path, ffmpeg="ffmpeg", ffprobe="ffprobe", timeout=600, max_audio_seconds=1800):
     """Yield a temporary mono 16 kHz signed-16 PCM WAV and absolute source timing.
 
     The source is read only. Both decoding failures and caller cancellation remove
