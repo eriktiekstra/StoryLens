@@ -60,8 +60,9 @@ class FilmCraftParserTests(unittest.TestCase):
                  result(content=[Model(type="text", text='{"x": NaN}')]),
                  result(content=[Model(type="text", text="{incomplete")])]
         for response in cases:
-            with self.subTest(response=response), self.assertRaises(RuntimeError):
-                _decode_result(response)
+            for allow_null in (False, True):
+                with self.subTest(response=response, allow_null=allow_null), self.assertRaises(RuntimeError):
+                    _decode_result(response, allow_null=allow_null)
 
     def test_oversized_text_and_structured_results_are_rejected_not_truncated(self):
         for response in (result({"large": "é" * (1024 * 1024)}),
@@ -221,6 +222,7 @@ class FilmCraftTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_protocol_tool_and_parser_failures_close_session(self):
         for response, error in ((result({"error": "denied"}, error=True), None),
                                 (result(123), None),
+                                (result(content=[Model(type="text", text="null")]), None),
                                 (result({}), ValueError("JSON-RPC invalid params"))):
             with self.subTest(response=response, error=error):
                 self.events.clear()
@@ -229,6 +231,16 @@ class FilmCraftTransportTests(unittest.IsolatedAsyncioTestCase):
                     with self.assertRaisesRegex(RuntimeError, "FilmCraft tool 'example' failed"):
                         await client.call("example", {})
                     self.assert_closed()
+
+    async def test_explicit_null_result_keeps_session_but_tool_errors_still_close_it(self):
+        self.response = result(content=[Model(type="text", text="null")])
+        arguments = {"id": "clip.scaleToFrameSize", "params": {}}
+        async with FilmCraft(self.binary) as client:
+            self.assertIsNone(await client.call("command_run", arguments, allow_null=True))
+            self.response.is_error = True
+            with self.assertRaisesRegex(RuntimeError, "tool error"):
+                await client.call("command_run", arguments, allow_null=True)
+            self.assert_closed()
 
     async def test_cancelled_call_closes_session_and_preserves_cancellation(self):
         self.block = "call"

@@ -2,7 +2,7 @@
 
 Local-first, editor-independent media intelligence. MIT licensed; free to self-host.
 
-Current package: 0.9.0 — editor-independent media analysis, events/corrections and portable storyboards, optional FilmCraft 0.9.0 exchange, and M9 release/benchmark tooling. StoryLens indexes read-only sources, preserves metadata, measures technical signals, finds duplicate candidates, extracts timestamped scenes and recommends constrained selections with separate technical/relevance/story scores. Opt-in local models provide retrieval, captions and transcription. Durable FIFO jobs, bounded batches and optional MCP share the same services. No automatic model downloads, cloud fallback, telemetry, subscriptions or accounts. Default analysis and recommendations remain inference-free.
+Current package: 0.10.0 — a guided terminal workflow over editor-independent media analysis, events/corrections and portable storyboards, optional FilmCraft 0.9.0 exchange, and release/benchmark tooling. Run `storylens` in a terminal to create or resume a local project. Sources remain read-only. Opt-in local models provide retrieval, captions and transcription; technical-only is the wizard default even when model paths are configured. No automatic model downloads, cloud fallback, telemetry, subscriptions or accounts.
 
 Editable JSON storyboards work without an editor. The optional [FilmCraft workflow](docs/USAGE.md#optional-filmcraft-interchange-m8) discovers real tools, creates a new approved project, imports saved source transcripts, previews and exports; it never edits an existing project in place. See [architecture](ARCHITECTURE.md), [milestones](docs/IMPLEMENTATION_PLAN.md), and primary-source research for [components](docs/research/media-ecosystem.md), [existing applications](docs/research/existing-applications.md), and [FilmCraft/MCP](docs/research/filmcraft-mcp.md).
 
@@ -24,6 +24,21 @@ Windows PowerShell: use py -3 -m venv .venv, then .venv\Scripts\Activate.ps1 and
 Optional HEIF support: python -m pip install -e '.[heif]'. Native codecs and camera support vary; see [formats](docs/USAGE.md#media-support).
 
 ## Quick start
+
+With the environment activated, start the guided terminal workflow:
+
+~~~sh
+storylens
+# Explicit equivalent, including when resuming a saved project:
+storylens wizard
+storylens wizard --project "$HOME/storylens-projects/holiday"
+~~~
+
+The wizard asks for a mixed-media folder and a separate local project directory, checks prerequisites, runs analysis with progress, recommends a target-duration storyboard and guides review/editing. Local JPEG contact sheets show source images/scene references; they are not a rendered film. An optional FilmCraft path creates a new project, renders a preview and exports only with separate approvals. Interrupted analysis resumes from stage caches; existing projects reopen their saved storyboards rather than silently replacing edits. [Wizard controls and safety](docs/USAGE.md#guided-project-wizard).
+
+A browser GUI is a later stage, not currently served or launched automatically. Project orchestration is separate from terminal prompts so a future frontend can reuse the same source, cache, state and approval logic.
+
+### Scriptable commands
 
 Global options precede the command. Keep the catalog local even when media lives on a NAS:
 

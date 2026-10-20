@@ -34,7 +34,10 @@ def parser():
     cli.add_argument("--exclude", action="append", dest="exclusions", help="Glob against relative path or basename; replaces configured exclusions")
     cli.add_argument("--trust-stat", action=argparse.BooleanOptionalAction, default=None, help="Reuse identity for matching size/mtime (weaker than hashing)")
     cli.add_argument("--json", action="store_true", help="Machine-readable versioned JSON")
-    commands = cli.add_subparsers(dest="command", required=True)
+    commands = cli.add_subparsers(dest="command")
+    wizard = commands.add_parser("wizard", help="Guided local project analysis, storyboard review and optional export")
+    wizard.add_argument("--project", type=Path, help="New or existing wizard project directory")
+    wizard.add_argument("--source", type=Path, help="Source collection directory for a new project")
     for name in ("scan", "analyze"):
         command = commands.add_parser(name, help="Index files" if name == "scan" else "Extract metadata and technical measurements")
         command.add_argument("path", type=Path)
@@ -186,8 +189,22 @@ def emit(result, machine):
 
 
 def main(argv=None):
-    args = parser().parse_args(argv)
+    cli = parser()
+    args = cli.parse_args(argv)
+    if args.command is None:
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            if args.json:
+                emit({"schema_version": "1.0", "error": "No command supplied; the wizard needs an interactive terminal"}, True)
+                return 1
+            cli.print_help()
+            return 0
+        args.command, args.project, args.source = "wizard", None, None
     try:
+        if args.command == "wizard":
+            if args.json:
+                raise ValueError("The interactive wizard does not support --json; use individual commands for automation")
+            if args.database is not None:
+                raise ValueError("The wizard manages a project-local catalog; choose wizard --project instead of --database")
         config = load_config(args.config, database=args.database, ffprobe=args.ffprobe, ffmpeg=args.ffmpeg,
                              timeout=args.timeout, exclusions=args.exclusions, trust_stat=args.trust_stat,
                              scene_threshold=args.scene_threshold, minimum_scene_seconds=args.minimum_scene_seconds, max_scenes=args.max_scenes,
@@ -195,6 +212,9 @@ def main(argv=None):
                              ollama_endpoint=args.ollama_endpoint, semantic_timeout=args.semantic_timeout,
                              max_audio_seconds=args.max_audio_seconds, audio_transcription_model=args.audio_transcription_model,
                              audio_transcription_device=args.audio_transcription_device, audio_transcription_language=args.audio_transcription_language)
+        if args.command == "wizard":
+            from .wizard import run
+            return run(config, project=args.project, source=args.source)
         if args.command == "benchmark":
             from . import benchmark
             if args.action == "generate":

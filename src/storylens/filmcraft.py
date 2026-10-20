@@ -151,12 +151,13 @@ async def create(app, document, *, executable, output, roots, approved=False,
               "warnings": ["No automatic retry; editor batches are not transactional.",
                            "Source references are checked, not OS-sandboxed; use a trusted editor binary."]}
     async with FilmCraft(executable, timeout=timeout) as client:
-        discovery = await _compatible(client, {"file.newSequence", "timeline.place", "file.saveAs"})
+        discovery = await _compatible(client, {"file.newSequence", "timeline.place", "timeline.select",
+                                                "clip.scaleToFrameSize", "file.saveAs"})
         report["server"] = discovery["server"]
 
-        async def call(tool, arguments):
+        async def call(tool, arguments, *, allow_null=False):
             try:
-                result = await client.call(tool, arguments)
+                result = await client.call(tool, arguments, allow_null=allow_null)
             except RuntimeError as error:
                 report["operations"].append({"tool": tool, "arguments": arguments, "error": str(error)})
                 raise
@@ -164,7 +165,8 @@ async def create(app, document, *, executable, output, roots, approved=False,
             return result
 
         async def command(name, params):
-            return await call("command_run", {"id": name, "params": params})
+            return await call("command_run", {"id": name, "params": params},
+                              allow_null=name == "clip.scaleToFrameSize")
 
         try:
             sequence = await command("file.newSequence", {"name": document["title"] or "StoryLens",
@@ -195,6 +197,11 @@ async def create(app, document, *, executable, output, roots, approved=False,
                     raise ValueError("Editor placed no clips")
                 expected.append((row, item_id, placed["clips"]))
             state = await call("sequence_inspect", {})
+            visual = [clip["clip"] for track in state["video"] for clip in track["items"] if "clip" in clip]
+            if visual:
+                await command("timeline.select", {"clips": visual, "add": False, "toggle": False, "linked": False})
+                await command("clip.scaleToFrameSize", {})
+                state = await call("sequence_inspect", {})
             _verify_sequence(state, rate, sequence["sequence"], expected)
             # Check sources again before saving the only persistent artifact.
             for key, item in media.items():

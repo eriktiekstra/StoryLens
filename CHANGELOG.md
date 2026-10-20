@@ -2,6 +2,17 @@
 
 Entries describe capabilities and verification at that release. Later milestones supersede earlier future-work lists; historical test counts and model smokes are not current verification guarantees.
 
+## 0.10.0 — 2026-10-20 (guided terminal projects)
+
+- Added `storylens wizard` and made bare interactive `storylens` launch the same guided workflow. Non-terminal bare calls show help instead of waiting for input; explicit wizard requires a TTY, and existing help/version/subcommands/JSON interfaces remain independently scriptable.
+- Added UI-independent persisted projects with a private local catalog, explicit technical-only/default or local-AI analysis, preflight counts/tool checks, actual progress checkpoints, cached resume and honest partial/interrupted state. Wizard projects never silently reuse the global catalog or write into the source collection.
+- Added guided target-duration recommendations, source browsing/required-excluded feedback, reorder/title/hold/source-range editing, strict reload/validation and new versioned storyboard files. Edits and analysis/feedback changes invalidate earlier review/editor linkage rather than silently retaining stale approval.
+- Added bounded, orientation-aware local JPEG contact sheets with metadata-free source/scene derivatives and explicit audio/unavailable labels. Scene samples disclose their own timestamps and are not a rendered movie or frame-accurate cut preview. External viewers open only on request.
+- Added optional FilmCraft discovery/create/PNG-preview/MP4-export steps using existing verified APIs, separate confirmations and persisted operation reports. Native files changed after preview and changed catalog source identities cannot be exported under stale review.
+- Fit visual clips to the FilmCraft sequence canvas with preserved aspect ratio before saving, fixing native-size tiny/cropped output for mixed source dimensions. Explicit void-command JSON null is supported without accepting missing payloads or hiding editor errors; multi-tool operation reports have a separate 16 MiB aggregate bound.
+
+This stage is a terminal frontend over reusable project orchestration, not a browser GUI or HTTP server. A later browser interface can reuse project state and operations, but would need its own network authentication/origin/root policy. Private-media/NAS/GPU acceptance remains separate from generated-media/software verification.
+
 ## 0.9.0 — 2026-10-19 (M9 release and operational tooling)
 
 - Added deterministic generated image/video/audio fixture manifests and isolated cold/warm catalog benchmarks with counters, environment, wall/process-CPU time, parent high-water RSS, optional cProfile/pstats and explicit cache/measurement caveats. Benchmarks use a new local workspace, never the user's configured catalog, and disable model inference.

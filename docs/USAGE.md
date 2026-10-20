@@ -1,11 +1,39 @@
 # CLI and operational guide
 
+## Guided project wizard
+
+Run `storylens` in an interactive terminal, or the explicit equivalent `storylens wizard`. No separate scan/analyze/storyboard commands are needed for this path:
+
+~~~sh
+storylens
+storylens wizard --source "/mounted/holiday" --project "$HOME/storylens-projects/holiday"
+# Reopen the same project, retaining caches, feedback and saved edits:
+storylens wizard --project "$HOME/storylens-projects/holiday"
+~~~
+
+The wizard chooses a mixed-media source folder and an independent local project directory, checks recognized sources and required tools, confirms analysis, shows actual checkpoint counts, asks for target film duration/strategy, and guides storyboard review. Keep the project directory local and outside the source folder, especially when media is on a NAS. A new project never adopts the global catalog or overwrites an unrelated existing directory.
+
+Technical-only is the default **even if configured model paths exist**. Explicit local-AI mode uses installed/configured local models and selected fast/standard/deep coverage; there are no automatic downloads, cloud fallbacks or fabricated captions. Optional transcription follows current core support for standalone audio, not automatic speech extraction from videos. Tool/model configuration can be supplied with ordinary global options or `--config`; the guided mode discloses the selected runtime before analysis.
+
+Review can browse all indexed media, require/exclude/neutralize whole-media selection, regenerate with a different budget/strategy, reorder entries, change a title or image hold/source interval, and reload deliberately edited JSON. Existing feedback, source bounds, duration budgets and whole transcript-timed conversation constraints still apply; the wizard does not silently relax them. Partial analysis failures are shown and require a deliberate decision before using remaining evidence.
+
+Local JPEG contact sheets provide visual source review without a server. Images are orientation-aware derivatives; video tiles are stored scene samples labeled with their own source timestamps, not frame-accurate cut previews or a finished film. Audio and unavailable thumbnails are labeled explicitly. Pages are bounded to24 entries and only opened in an external viewer/browser on request. Outputs strip inherited source metadata, but still contain private visual content/filenames; protect the project directory.
+
+Approving a storyboard is separate from editor mutation. The optional FilmCraft route checks a trusted executable and the actual supported tools/version, creates only a new project, renders a PNG preview and requires a separate export approval. The wizard creates a 1920x1080 canvas and aspect-fits visual sources before saving. Storyboard edits invalidate old approval/editor linkage; an editor file changed after preview needs a new preview. Existing exact frame-grid and nonzero-origin restrictions remain explicit errors, not hidden snapping/rebasing.
+
+Project state, the catalog, versioned storyboard files and operation reports remain local. Interrupt with Ctrl-C or EOF and reopen the printed project directory; completed analysis stages are cached. Reopening an existing storyboard offers review or deliberate cached reanalysis/regeneration rather than silently discarding edits. Do not run multiple writers against the same wizard project at once. Only open trusted local project/config files, since runtime settings select trusted executables.
+
+Bare invocation in a pipeline/non-terminal prints help and exits0 rather than waiting for input. Explicit `wizard` requires interactive stdin/stdout and fails clearly without them. `--help`, `--version`, existing subcommands and JSON APIs retain their noninteractive behavior. `--json` and an explicit global `--database` are rejected for wizard mode: use its `--project` or individual automation commands instead. `wizard --source`/`--project` are optional prompt conveniences, not noninteractive bypasses for consent.
+
+The first stage is a terminal interface. A browser GUI remains a later stage; no HTTP server, port or automatic browser session is introduced. Reusable project orchestration lives outside terminal input/output so that a future frontend can share the same analysis, state, authorization and approval checks.
+
 ## CLI reference
 
 Global options precede the command: storylens [OPTIONS] COMMAND ... .
 
 | Command | Behavior |
 | --- | --- |
+| wizard [--source DIR] [--project DIR] | Guided terminal project workflow; also the default for bare interactive storylens |
 | scan PATH | Recursively index recognized files and full SHA-256 identities; no media decode |
 | analyze PATH [--stage all/metadata/technical/semantic/transcript] [--depth fast/standard/deep] [--force] | Independently cached stages; defaults to metadata+technical; semantics/transcription require opt-in model configuration |
 | list [--kind image/video/audio] [--limit N] [--after CURSOR] | Bounded identity page; default 50, maximum 500 |

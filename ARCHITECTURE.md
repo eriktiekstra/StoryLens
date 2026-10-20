@@ -1,6 +1,6 @@
 # StoryLens architecture
 
-Status: M1–M8 implementation and M9 release tooling are present. Private holiday-media review, real NAS/GPU performance and hardware/media acceptance are deferred until implementation is complete; generated-media/CI evidence is recorded separately.
+Status: M1–M8 implementation, M9 release tooling and the 0.10 guided terminal workflow are present. Private holiday-media review, real NAS/GPU performance and hardware/media acceptance remain separate from generated-media/CI evidence. A browser GUI is a later stage, not a currently exposed server.
 
 ## Scope and decisions
 
@@ -21,6 +21,7 @@ No server, queue broker, vector database, Docker requirement, model download or 
 - **Semantic providers/stages**: optional local CPU Transformers CLIP/SigLIP image/text encoders and an explicitly loopback, cloud-disabled Ollama vision daemon. Embedding and caption stages cache independently from each other and from technical results. Search performs exact cosine ranking only within one model/content/library/preprocessing space and depth.
 - **CLI/MCP**: synchronous CLI commands plus durable job controls; the optional stdio SDK transport calls the same services and adds explicit approved-root authorization and bounded envelopes.
 - **FilmCraft**: `filmcraft.py` consumes the service/catalog and current feedback; `filmcraft_transport.py` lazily loads the optional SDK and owns one bounded headless stdio session. Real identity/tool/command discovery precedes edits. Creation targets only a new project, verifies source hashes and exact inspected clip timing, saves privately and checks reopening before no-overwrite publication. Rendering uses an authorized project snapshot and a separate explicit approval; no editor tools are added to StoryLens's MCP server.
+- **Guided projects**: `workflow.Project` owns project-local configuration/catalog/state, versioned storyboard artifacts, current-source scope and explicit review/editor transitions without reading terminal input. `wizard` is a line-oriented frontend; `review` produces bounded local JPEG contact sheets. Both bare interactive CLI and `wizard` call the same frontend. Existing scriptable commands bypass it. A future browser frontend can call the project service without parsing terminal prompts or duplicating analysis; network authentication/origin/root controls would be a separate boundary.
 
 Future modules depend inward on the service and storage contracts. Add concrete modules when needed, not a dynamic plugin marketplace.
 

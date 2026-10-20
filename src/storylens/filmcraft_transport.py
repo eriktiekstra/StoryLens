@@ -77,7 +77,7 @@ def _dump(model):
     return model.model_dump(mode="json", by_alias=True, exclude_unset=True)
 
 
-def _decode_result(response):
+def _decode_result(response, *, allow_null=False):
     """Decode one unambiguous JSON result, without dropping content blocks."""
     structured = response.structured_content
     content = response.content
@@ -96,6 +96,8 @@ def _decode_result(response):
         if content and json.dumps(text_value, sort_keys=True) != json.dumps(structured, sort_keys=True):
             raise RuntimeError("FilmCraft returned conflicting structured and text results")
         return structured
+    if allow_null and content and text_value is None:
+        return None
     if not isinstance(text_value, (dict, list)):
         raise RuntimeError("FilmCraft result must be a JSON object or array")
     return text_value
@@ -166,13 +168,13 @@ class FilmCraft:
             raise RuntimeError("FilmCraft must be used inside an open async context")
         return self._session
 
-    async def call(self, tool: str, arguments: dict) -> dict | list:
-        """Call the exact discovered tool; return its complete JSON container."""
+    async def call(self, tool: str, arguments: dict, *, allow_null: bool = False) -> dict | list | None:
+        """Return complete JSON containers, or explicit JSON null for declared void commands."""
         session = self._require_session()
         try:
             async with asyncio.timeout(self.timeout):
                 response = await session.call_tool(tool, arguments)
-                return _decode_result(response)
+                return _decode_result(response, allow_null=allow_null)
         except BaseException as exc:
             await self._close()
             if isinstance(exc, TimeoutError):
