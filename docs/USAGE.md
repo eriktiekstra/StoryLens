@@ -2,7 +2,7 @@
 
 ## Guided project wizard
 
-Run `storylens` in an interactive terminal, or the explicit equivalent `storylens wizard`. No separate scan/analyze/storyboard commands are needed for this path:
+Run `storylens`, or the explicit equivalent `storylens wizard`, to open the local browser wizard. No separate scan/analyze commands are needed for this path:
 
 ~~~sh
 storylens
@@ -11,22 +11,21 @@ storylens wizard --source "/mounted/holiday" --project "$HOME/storylens-projects
 storylens wizard --project "$HOME/storylens-projects/holiday"
 ~~~
 
-The wizard chooses a mixed-media source folder and an independent local project directory, checks recognized sources and required tools, confirms analysis, shows actual checkpoint counts, asks for target film duration/strategy, and guides storyboard review. Keep the project directory local and outside the source folder, especially when media is on a NAS. A new project never adopts the global catalog or overwrites an unrelated existing directory.
-Preflight checks extensions and installed optional decoder availability. If HEIC/HEIF files are present without `pillow-heif`, it displays the exact install command before analysis; those files otherwise fail metadata and image analysis. Install the package into the same Python environment that provides `storylens`, then create a fresh project or run cached reanalysis. The default per-tool timeout is 600 seconds; existing video/audio projects display their saved timeout. Set `STORYLENS_TIMEOUT` before creating a project to choose a different value; reopening deliberately retains the project's saved timeout.
+Choose an existing mixed-media source folder and a separate private local project directory. Keep project state local and outside the source folder, especially when media is on a NAS. The browser checks recognized source counts and required tools, then waits for you to start analysis. New projects never adopt the global catalog or overwrite an unrelated existing directory.
 
-Technical-only is the default **even if configured model paths exist**. Explicit local-AI mode uses installed/configured local models and selected fast/standard/deep coverage; there are no automatic downloads, cloud fallbacks or fabricated captions. Optional transcription follows current core support for standalone audio, not automatic speech extraction from videos. Tool/model configuration can be supplied with ordinary global options or `--config`; the guided mode discloses the selected runtime before analysis.
+The browser path performs metadata and technical analysis without model inference, even when model paths are configured. It reads sources but never modifies them. Optional local semantic analysis, transcription, corrections and editable storyboards remain available through the scriptable CLI, Python service and MCP tools; they are not a hidden AI step in the wizard.
 
-Review can browse all indexed media, require/exclude/neutralize whole-media selection, regenerate with a different budget/strategy, reorder entries, change a title or image hold/source interval, and reload deliberately edited JSON. Existing feedback, source bounds, duration budgets and whole transcript-timed conversation constraints still apply; the wizard does not silently relax them. Partial analysis failures are shown and require a deliberate decision before using remaining evidence.
+Preflight warns about HEIC/HEIF files without the optional `pillow-heif` decoder and supplies the install command. Install it into the environment providing `storylens`. The default per-FFmpeg/ffprobe timeout is 600 seconds. Set `STORYLENS_TIMEOUT` before creating a project to change it; existing projects retain their saved timeout.
 
-Local JPEG contact sheets provide visual source review without a server. Images are orientation-aware derivatives; video tiles are stored scene samples labeled with their own source timestamps, not frame-accurate cut previews or a finished film. Audio and unavailable thumbnails are labeled explicitly. Pages are bounded to24 entries and only opened in an external viewer/browser on request. Outputs strip inherited source metadata, but still contain private visual content/filenames; protect the project directory.
+Analysis shows actual indexed/analyzed/cached/failed checkpoint counts and results. Partial failures remain visible; inspect the error list before relying on the remaining evidence. Reopen the same project and explicitly run analysis again to reuse successful stage caches. Project state and catalog remain local; do not run multiple writers against a project. Only open trusted project/config files because configuration selects local executables.
 
-Approving a storyboard is separate from editor mutation. The optional FilmCraft route checks a trusted executable and the actual supported tools/version, creates only a new project, renders a PNG preview and requires a separate export approval. The wizard creates a 1920x1080 canvas and aspect-fits visual sources before saving. Storyboard edits invalidate old approval/editor linkage; an editor file changed after preview needs a new preview. Existing exact frame-grid and nonzero-origin restrictions remain explicit errors, not hidden snapping/rebasing.
+After analysis, copy the provided StoryLens MCP configuration snippet into your existing host, then copy the handoff prompt to that agent. The snippet uses the current project's `catalog.sqlite3`, not a global catalog; install the optional MCP extra before your host launches it. See [host-specific configuration](INTEGRATIONS.md#mcp-setup-for-codex-and-claude-code). Configure the official FilmCraft MCP separately in that host. StoryLens does not launch or control either your agent or FilmCraft and does not create native projects, render previews or export movies.
 
-Project state, the catalog, versioned storyboard files and operation reports remain local. Interrupt with Ctrl-C or EOF and reopen the printed project directory; completed analysis stages are cached. Reopening an existing storyboard offers review or deliberate cached reanalysis/regeneration rather than silently discarding edits. Do not run multiple writers against the same wizard project at once. Only open trusted local project/config files, since runtime settings select trusted executables.
+The handoff's media-inspection checkbox is off by default. Without explicit consent, the prompt tells your agent not to open/decode original media; technical metrics alone cannot establish subjective clip quality, people, emotion or visual continuity. Opt in only for the source collection you want the agent to inspect. This is a copied instruction, not a security sandbox or a file transfer. Cloud-provider disclosure is a separate approval: media, frames, transcripts, metadata and paths can all be private, and inspection consent does not authorize their upload. [Consent details and example prompt](INTEGRATIONS.md#agent-handoff-and-media-consent).
 
-Bare invocation in a pipeline/non-terminal prints help and exits0 rather than waiting for input. Explicit `wizard` requires interactive stdin/stdout and fails clearly without them. `--help`, `--version`, existing subcommands and JSON APIs retain their noninteractive behavior. `--json` and an explicit global `--database` are rejected for wizard mode: use its `--project` or individual automation commands instead. `wizard --source`/`--project` are optional prompt conveniences, not noninteractive bypasses for consent.
+The wizard binds to `127.0.0.1` on a local port and attempts to open your browser. If that fails, open the private URL printed in the terminal on the same computer. Keep its session URL/token private; do not expose the listener through a proxy, port forwarding or a LAN bind. Leave the process running while using the page; stop it with Ctrl-C. Closing the tab does not itself stop the process. The loopback page is separate from the stdio MCP server.
 
-The first stage is a terminal interface. A browser GUI remains a later stage; no HTTP server, port or automatic browser session is introduced. Reusable project orchestration lives outside terminal input/output so that a future frontend can share the same analysis, state, authorization and approval checks.
+Bare `storylens` in an interactive terminal opens the same browser workflow as `storylens wizard`; a bare invocation in a pipeline prints help instead of blocking. Explicit browser-wizard startup requires an interactive terminal. `--help`, `--version`, existing subcommands and JSON APIs retain their scriptable behavior. `--json` and an explicit global `--database` are rejected for wizard mode: select its `--project` instead. `wizard --source`/`--project` pre-fill browser fields; they do not skip the analysis decision or authorize agent/cloud access.
 
 ## CLI reference
 
@@ -34,7 +33,7 @@ Global options precede the command: storylens [OPTIONS] COMMAND ... .
 
 | Command | Behavior |
 | --- | --- |
-| wizard [--source DIR] [--project DIR] | Guided terminal project workflow; also the default for bare interactive storylens |
+| wizard [--source DIR] [--project DIR] | Local browser analysis and agent handoff; also the default for bare storylens |
 | scan PATH | Recursively index recognized files and full SHA-256 identities; no media decode |
 | analyze PATH [--stage all/metadata/technical/semantic/transcript] [--depth fast/standard/deep] [--force] | Independently cached stages; defaults to metadata+technical; semantics/transcription require opt-in model configuration |
 | list [--kind image/video/audio] [--limit N] [--after CURSOR] | Bounded identity page; default 50, maximum 500 |
@@ -221,46 +220,16 @@ Default image holds are 4 seconds; nonspeech clips target 10 seconds, split at s
 
 Portable [storyboard-v1 JSON](../src/storylens/schemas/storyboard-v1.schema.json) contains source IDs, absolute half-open source times (null for images), durations, separate scores, required/excluded sets, rationale and caveats; no paths or transcript text. Edit title, playback order, image holds and source intervals in JSON, update each duration and `total_seconds`, then run `storyboard-check`. Current feedback, source coverage, speech-block integrity, duplicates/overlaps and the hard duration budget are revalidated. Do not erase required/excluded arrays to bypass feedback. Rescanned moved bytes keep their IDs. Rescan changed media before relying on indexed evidence; validation does not rehash sources.
 
-Bounds: at most 10,000 current referenced media, 100,000 generated candidates, 500 selected entries, and 2 MiB CLI input JSON. Overflow is an explicit error, not a truncated result. Use longer clip targets or a smaller catalog when candidate generation exceeds its bound. MCP returns complete storyboards up to its 131,072-byte serialized response budget; larger documents fail explicitly and need a shorter duration or local CLI export. These commands do not write sources or render; optional editor exchange is separate.
+Bounds: at most 10,000 current referenced media, 100,000 generated candidates, 500 selected entries, and 2 MiB CLI input JSON. Overflow is an explicit error, not a truncated result. Use longer clip targets or a smaller catalog when candidate generation exceeds its bound. MCP returns complete storyboards up to its 131,072-byte serialized response budget; larger documents fail explicitly and need a shorter duration or local CLI export. These commands do not write sources or render; editor work belongs to your existing MCP host.
 
-## Optional FilmCraft interchange (M8)
+## FilmCraft handoff
 
-Install `storylens[mcp]` and obtain a trusted FilmCraft **0.9.0** CLI separately. StoryLens never downloads it automatically. Use its absolute executable path; no shell or desktop bridge is launched. This workflow keeps the storyboard portable and creates a new `.fcproj`, never overwriting an existing editor project.
+StoryLens provides local analysis and portable storyboard data, not a FilmCraft CLI adapter. Register StoryLens and the official FilmCraft MCP as separate servers in your existing agent host. Use the browser's project-specific configuration and copied prompt, or configure the host directly as described in [integrations](INTEGRATIONS.md#agent-handoff-and-media-consent).
 
-~~~sh
-storylens filmcraft --executable /opt/filmcraft/bin/filmcraft-cli discover
-storylens storyboard --duration 60 > storyboard.json
-# Review/edit the storyboard, its source ranges, exclusions and required media:
-storylens storyboard-check storyboard.json
-storylens filmcraft --executable /opt/filmcraft/bin/filmcraft-cli create storyboard.json \
-  --output /local/edits/holiday.fcproj --allow-root /mounted/media --approve \
-  --fps 24 --width 1920 --height 1080
-storylens filmcraft --executable /opt/filmcraft/bin/filmcraft-cli preview \
-  --project /local/edits/holiday.fcproj --output /local/edits/review.png \
-  --seconds 1 --allow-root /mounted/media --approve
-# Inspect the PNG and project before separately approving export:
-storylens filmcraft --executable /opt/filmcraft/bin/filmcraft-cli export \
-  --project /local/edits/holiday.fcproj --output /local/edits/holiday.mp4 \
-  --allow-root /mounted/media --approve
-~~~
+Your agent makes creative decisions with your review, discovers its actual configured FilmCraft tools and calls those tools directly. Native project creation/editing, previews and movie export are operations of that host and FilmCraft, not StoryLens commands or wizard steps. Review source selections, cuts, destination paths and any export in the host before authorizing them. Do not infer compatibility with your FilmCraft installation from historical package-adapter tests.
 
-Keep the catalog selection consistent with global `--database` before `filmcraft`. Output parents must exist; outputs must be new paths outside every approved source root. Repeat `--allow-root` for additional source directories. Missing approval, changed source hashes, unsupported versions, private/proxy/offline source references and existing outputs fail. Creation checks current storyboard feedback again and rehashes every selected source before import and before save. Editing source files requires rescanning first. The external editor is trusted, not sandboxed; use OS confinement/read-only mounts for stronger privacy.
+Existing timestamped JSON/SRT/VTT transcripts can still be imported with StoryLens's ordinary `transcript` command or `import_transcript` MCP tool. The removed editor-specific native-project import is not needed for that general analysis capability.
 
-Supported sequence rates: 24, 25, 30, 50, 60, 24000/1001, 30000/1001 and 60000/1001. Entry durations must represent whole sequence frames (only <=1 ns decimal representation error is tolerated); off-grid/sub-frame entries fail rather than silently moving cuts across exclusions or speech boundaries. Edit holds/durations or choose another rate, then revalidate the storyboard. Source in points remain absolute presentation times and convert to 254,016,000,000 ticks/second. Zero origins are supported; positive MP4/MOV/M4V origins require the editor's imported duration to equal catalog presentation end. Negative, rebased or unknown nonzero mappings fail rather than guessing an offset. Speed/reverse/edited-sequence remapping are not added.
-
-Preview is a new PNG at a time inside the active sequence; export is an entire-sequence H.264/AAC MP4 with software encoding. Container/audio padding can exceed video duration slightly: use inspected sequence ticks and video frame count for cut/budget timing. All serialized file-backed project sources must be approved and online, including unused assets. Proxy/offline media and unsupported native project schemas are rejected before rendering. Writes publish only completed artifacts and never overwrite existing files. Reports contain per-operation results/errors; partial in-memory edits are not transactional and are discarded on session close. Inspect any failure, never blindly retry a non-idempotent command.
-
-Import a **saved source transcript** without another transcription run:
-
-~~~sh
-storylens filmcraft --executable /opt/filmcraft/bin/filmcraft-cli transcript \
-  --project /local/edits/holiday.fcproj --item-id 4 --media-id 'sha256:SOURCE_ID' \
-  --allow-root /mounted/media --approve
-~~~
-
-Use an actual item ID from editor inspection, never a filename-derived ID. Only schema 15 saved local-file media transcripts are supported. The item's authorized file must match the catalog SHA-256; supplied word ticks/speaker labels are preserved in ordinary transcript results, checked against source coverage, and remain unverified speech evidence. Derived sequence transcript times are not source times and are not imported. Word runs with the same speaker and gaps <=2 seconds become segments without discarding original words. Storyboard, project and transport JSON are bounded to 2 MiB each; discovery/result failures are explicit, never truncated edit plans.
-
-`--request-timeout SECONDS` belongs after `filmcraft` and before its action (default 300 per request); a timeout closes the SDK session and does not automatically retry. Export jobs are editor-owned, not StoryLens durable analysis jobs. The generated-fixture Linux runtime was verified; user review of private holiday media and desktop/cross-platform workflows remain acceptance work.
 
 ## Release operation and profiling (M9)
 

@@ -1,6 +1,14 @@
 # Changelog
 
-Entries describe capabilities and verification at that release. Later milestones supersede earlier future-work lists; historical test counts and model smokes are not current verification guarantees.
+Entries describe capabilities and verification at that release, not active usage instructions. Later entries supersede earlier future-work lists; historical test counts and model smokes are not current verification guarantees. In particular, the FilmCraft adapter and terminal editor workflows recorded in 0.8.0/0.10.0 below have been removed.
+
+## Unreleased — local browser wizard and agent handoff
+
+- Replaced the terminal questionnaire/editor flow with a loopback browser wizard, opened by both `storylens` and `storylens wizard`. It creates or reopens a separate private local project, runs technical analysis, and shows progress/results.
+- Added an explicit handoff: a project-specific StoryLens MCP configuration snippet pointing at `<project>/catalog.sqlite3` and a prompt to copy to the user's existing MCP agent. StoryLens does not launch that agent or FilmCraft; the host owns creative decisions and calls the official FilmCraft MCP directly.
+- Made original-media inspection opt-in in the copied prompt. Inspection permission does not authorize cloud/provider disclosure; media and private analysis require separate user approval before sharing.
+- Removed the package-owned FilmCraft CLI/transport/adapter, native-project creation and transcript parsing, preview/movie export APIs, and wizard editor steps. Ordinary analysis, supplied JSON/SRT/VTT transcript import/export, local model APIs, events/corrections, portable storyboards, MCP services and benchmarks remain available.
+- Updated current product, usage, API and architecture documentation. Earlier editor/runtime evidence remains historical and does not verify the new browser path or a user's host/server configuration.
 
 ## 0.10.0 — 2026-10-20 (guided terminal projects)
 
@@ -14,7 +22,7 @@ Entries describe capabilities and verification at that release. Later milestones
 - Wizard preflight now detects HEIC/HEIF source files and warns when the optional `pillow-heif` decoder is missing, with the install command before analysis consent. Video/audio preflight shows the saved FFmpeg/ffprobe timeout and explains how to set a longer timeout for a new project.
 - Raised the default external-tool timeout from 30 to 600 seconds for metadata, video and audio FFmpeg/ffprobe subprocesses. Explicit CLI, TOML and `STORYLENS_TIMEOUT` settings still override it; existing projects retain their saved timeout. This accommodates large/high-resolution phone media at the cost of waiting longer before an unresponsive process times out.
 
-This stage is a terminal frontend over reusable project orchestration, not a browser GUI or HTTP server. A later browser interface can reuse project state and operations, but would need its own network authentication/origin/root policy. Private-media/NAS/GPU acceptance remains separate from generated-media/software verification.
+Historical release boundary: this was a terminal frontend over reusable project orchestration, not the current browser workflow. Its proposed later browser interface has since replaced the terminal/editor path; see Unreleased above. Private-media/NAS/GPU acceptance remains separate from generated-media/software verification.
 
 ## 0.9.0 — 2026-10-19 (M9 release and operational tooling)
 

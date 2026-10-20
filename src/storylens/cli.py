@@ -35,8 +35,8 @@ def parser():
     cli.add_argument("--trust-stat", action=argparse.BooleanOptionalAction, default=None, help="Reuse identity for matching size/mtime (weaker than hashing)")
     cli.add_argument("--json", action="store_true", help="Machine-readable versioned JSON")
     commands = cli.add_subparsers(dest="command")
-    wizard = commands.add_parser("wizard", help="Guided local project analysis, storyboard review and optional export")
-    wizard.add_argument("--project", type=Path, help="New or existing wizard project directory")
+    wizard = commands.add_parser("wizard", help="Open the local browser workflow for analysis and agent handoff")
+    wizard.add_argument("--project", type=Path, help="New or existing private project directory")
     wizard.add_argument("--source", type=Path, help="Source collection directory for a new project")
     for name in ("scan", "analyze"):
         command = commands.add_parser(name, help="Index files" if name == "scan" else "Extract metadata and technical measurements")
@@ -126,31 +126,6 @@ def parser():
     storyboard.add_argument("--depth", choices=("fast", "standard", "deep"), default="standard")
     check = commands.add_parser("storyboard-check", help="Validate edited storyboard JSON against current sources and corrections")
     check.add_argument("path", type=Path)
-    editor = commands.add_parser("filmcraft", help="Optional verified FilmCraft discovery and approved interchange")
-    editor.add_argument("--executable", required=True, type=Path, help="Trusted absolute FilmCraft CLI path")
-    editor.add_argument("--request-timeout", type=float, default=300, help="Per-editor-request timeout")
-    actions = editor.add_subparsers(dest="action", required=True)
-    inspect = actions.add_parser("discover", help="Read actual server tools, commands and document without edits")
-    inspect.add_argument("--project", type=Path)
-    create = actions.add_parser("create", help="Assemble a reviewed storyboard into a new saved project")
-    create.add_argument("path", type=Path, help="Reviewed StoryLens storyboard JSON")
-    create.add_argument("--output", required=True, type=Path)
-    create.add_argument("--fps", default="24", help="Exact sequence frame rate, e.g. 24 or 24000/1001")
-    create.add_argument("--width", type=int, default=1920)
-    create.add_argument("--height", type=int, default=1080)
-    for name in ("preview", "export"):
-        action = actions.add_parser(name, help="Write a new preview PNG" if name == "preview" else "Write a new H.264 MP4")
-        action.add_argument("--project", required=True, type=Path)
-        action.add_argument("--output", required=True, type=Path)
-        if name == "preview":
-            action.add_argument("--seconds", required=True, type=float)
-    transcript = actions.add_parser("transcript", help="Import an explicitly mapped saved editor source transcript")
-    transcript.add_argument("--project", required=True, type=Path)
-    transcript.add_argument("--item-id", required=True, type=int)
-    transcript.add_argument("--media-id", required=True)
-    for action in (create, actions.choices["preview"], actions.choices["export"], transcript):
-        action.add_argument("--allow-root", action="append", required=True, type=Path)
-        action.add_argument("--approve", action="store_true", help="Approve the reviewed write/import; never overwrite")
     benchmark = commands.add_parser("benchmark", help="Generate fixtures or measure isolated cold/warm catalog passes")
     actions = benchmark.add_subparsers(dest="action", required=True)
     fixture = actions.add_parser("generate", help="Generate redistributable media in a new directory")
@@ -192,19 +167,21 @@ def main(argv=None):
     cli = parser()
     args = cli.parse_args(argv)
     if args.command is None:
+        if args.json:
+            emit({"schema_version": "1.0", "error": "The browser wizard does not support --json; use individual commands for automation"}, True)
+            return 1
         if not sys.stdin.isatty() or not sys.stdout.isatty():
-            if args.json:
-                emit({"schema_version": "1.0", "error": "No command supplied; the wizard needs an interactive terminal"}, True)
-                return 1
             cli.print_help()
             return 0
         args.command, args.project, args.source = "wizard", None, None
     try:
         if args.command == "wizard":
             if args.json:
-                raise ValueError("The interactive wizard does not support --json; use individual commands for automation")
+                raise ValueError("The browser wizard does not support --json; use individual commands for automation")
             if args.database is not None:
-                raise ValueError("The wizard manages a project-local catalog; choose wizard --project instead of --database")
+                raise ValueError("The browser wizard manages a project-local catalog; choose wizard --project instead of --database")
+            if not sys.stdin.isatty() or not sys.stdout.isatty():
+                raise ValueError("The browser wizard requires an interactive terminal; use scriptable commands in pipelines")
         config = load_config(args.config, database=args.database, ffprobe=args.ffprobe, ffmpeg=args.ffmpeg,
                              timeout=args.timeout, exclusions=args.exclusions, trust_stat=args.trust_stat,
                              scene_threshold=args.scene_threshold, minimum_scene_seconds=args.minimum_scene_seconds, max_scenes=args.max_scenes,
@@ -213,7 +190,7 @@ def main(argv=None):
                              max_audio_seconds=args.max_audio_seconds, audio_transcription_model=args.audio_transcription_model,
                              audio_transcription_device=args.audio_transcription_device, audio_transcription_language=args.audio_transcription_language)
         if args.command == "wizard":
-            from .wizard import run
+            from .web_wizard import run
             return run(config, project=args.project, source=args.source)
         if args.command == "benchmark":
             from . import benchmark
@@ -226,33 +203,6 @@ def main(argv=None):
                                        passes=args.passes, profile=args.profile)
             emit(result, True)
             return 2 if result.get("failed") else 0
-        if args.command == "filmcraft":
-            import asyncio
-            from .filmcraft_transport import FilmCraft
-            from . import filmcraft
-
-            async def exchange():
-                if args.action == "discover":
-                    async with FilmCraft(args.executable, project=args.project,
-                                         timeout=args.request_timeout) as client:
-                        return await client.discover()
-                if args.action in {"preview", "export"}:
-                    return await filmcraft.render(executable=args.executable, project=args.project,
-                        output=args.output, roots=args.allow_root, approved=args.approve,
-                        seconds=getattr(args, "seconds", None), timeout=args.request_timeout)
-                with Analyzer(config) as app:
-                    if args.action == "transcript":
-                        filmcraft._approve(args.approve)
-                        return filmcraft.import_transcript(app, project=args.project, item_id=args.item_id,
-                            media_id=args.media_id, roots=args.allow_root)
-                    _, document = filmcraft._read_json(args.path)
-                    return await filmcraft.create(app, document, executable=args.executable, output=args.output,
-                        roots=args.allow_root, approved=args.approve, fps=args.fps, width=args.width,
-                        height=args.height, timeout=args.request_timeout)
-
-            result = asyncio.run(exchange())
-            emit(result, True)
-            return 2 if result.get("status") == "failed" else 0
         if args.command == "serve":
             try:
                 from .mcp_server import main as serve

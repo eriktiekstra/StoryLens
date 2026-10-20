@@ -1,8 +1,6 @@
-"""Real generated media exercise project isolation, recovery and approval gates."""
+"""Real generated media exercise project isolation, recovery and storyboard state."""
 
-import asyncio
 from copy import deepcopy
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -13,7 +11,6 @@ from unittest.mock import patch
 from PIL import Image
 
 from storylens.config import Config
-from storylens.filmcraft import TICKS
 from storylens.ingest import fingerprint, snapshot
 from storylens.service import Analyzer
 from storylens.workflow import MAX_JSON_BYTES, Project, preflight
@@ -202,18 +199,16 @@ class WorkflowTests(unittest.TestCase):
     def test_killed_running_state_is_recovered_honestly_on_open(self):
         manifest = self.manifest()
         manifest["state"]["analysis"]["status"] = "running"
-        manifest["state"]["operation"] = {"kind": "create", "status": "running", "report": None, "error": None}
         self.write_manifest(manifest)
         resumed = Project.open(self.project.directory)
         self.assertEqual(resumed.state["analysis"]["status"], "interrupted")
-        self.assertEqual(resumed.state["operation"]["status"], "interrupted")
-        self.assertIn("retry", resumed.state["operation"]["error"])
+        self.assertIn("resum", resumed.state["analysis"]["error"])
+        self.assertEqual(self.manifest()["state"], resumed.state)
 
-    def test_storyboard_edits_are_versioned_and_invalidate_approval_without_overwrites(self):
+    def test_storyboard_edits_are_versioned_without_overwrites(self):
         document = self.analyzed()
         first = self.project.document_path
         first_bytes = first.read_bytes()
-        self.project.approve(document)
         edited = deepcopy(document)
         edited["title"] = "Reviewed order"
         edited["items"].reverse()
@@ -221,15 +216,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertEqual(first.read_bytes(), first_bytes)
         self.assertEqual(self.project.load_storyboard(), edited)
-        self.assertIsNone(self.project.state["approved_hash"])
-        self.assertIsNone(self.project.state["editor"])
-        with self.assertRaisesRegex(ValueError, "changed since review"):
-            self.project.approve(document)
-        self.project.approve(edited)
-        self.assertTrue(self.project.state["approved_hash"])
         self.assertEqual(Project.open(self.project.directory).load_storyboard(), edited)
+        self.assertEqual(set(self.project.state), {"analysis", "storyboard"})
 
-    def test_another_session_cannot_approve_old_version_or_overwrite_new_review(self):
+    def test_another_session_cannot_overwrite_current_storyboard(self):
         document = self.analyzed()
         stale = Project.open(self.project.directory)
         changed = deepcopy(document)
@@ -238,56 +228,39 @@ class WorkflowTests(unittest.TestCase):
         current_path = self.project.document_path
         manifest_before = (self.project.directory / "project.json").read_bytes()
         with self.assertRaisesRegex(ValueError, "another session"):
-            stale.approve(document)
+            stale.save_storyboard(document)
         self.assertEqual((self.project.directory / "project.json").read_bytes(), manifest_before)
-        self.assertEqual(Project.open(self.project.directory).document_path, current_path)
+        reopened = Project.open(self.project.directory)
+        self.assertEqual(reopened.document_path, current_path)
+        self.assertEqual(reopened.load_storyboard(), changed)
 
-    def test_changed_source_blocks_preview_and_export_before_external_launch(self):
-        self.native_fixture()
-        with patch("storylens.filmcraft_transport.FilmCraft", FixtureFilmCraft):
-            asyncio.run(self.project.preview_editor("fixture-editor", approved=True))
-        Image.new("RGB", (48, 32), "purple").save(self.photo)
-        with patch("storylens.filmcraft_transport.FilmCraft", side_effect=AssertionError("must not launch")):
-            for operation in (self.project.preview_editor, self.project.export_editor):
-                with self.subTest(operation=operation), self.assertRaisesRegex(ValueError, "content changed"):
-                    asyncio.run(operation("untrusted-editor", approved=True))
-
-    def test_external_storyboard_edit_and_current_feedback_cannot_reuse_approval(self):
+    def test_external_storyboard_edits_and_current_feedback_are_validated(self):
         document = self.analyzed()
-        self.project.approve(document)
         changed = deepcopy(document)
         changed["title"] = "Externally edited"
         self.project.document_path.write_text(json.dumps(changed))
-        with self.assertRaisesRegex(ValueError, "changed since review"):
-            self.project.approve(document)
-        with self.assertRaisesRegex(ValueError, "reviewed and approved"):
-            asyncio.run(self.project.create_editor("must-not-launch", approved=True))
-        self.project.approve(changed)
+        self.assertEqual(self.project.load_storyboard(), changed)
         media_id = changed["items"][0]["media_id"]
         with Analyzer(self.project.config) as app:
             app.set_feedback(media_id, {"capture_time": "2025-01-02T03:04:05Z"})
-        with self.assertRaisesRegex(ValueError, "evidence or feedback changed"):
-            asyncio.run(self.project.create_editor("must-not-launch", approved=True))
+        self.assertEqual(self.project.media(media_id)["feedback"]["capture_time"], "2025-01-02T03:04:05Z")
         self.project.set_selection(media_id, "exclude")
-        self.assertIsNone(self.project.state["approved_hash"])
         with self.assertRaises(ValueError):
             self.project.load_storyboard()
         regenerated = self.project.recommend(duration_seconds=8)
         self.assertNotIn(media_id, {item["media_id"] for item in regenerated["items"]})
         self.assertIn(media_id, regenerated["excluded"])
 
-    def test_changed_source_requires_reanalysis_and_foreign_live_catalog_fails_closed(self):
-        document = self.analyzed()
-        self.project.approve(document)
+    def test_changed_source_reanalysis_refreshes_identity_and_foreign_catalog_fails_closed(self):
+        self.analyzed()
+        old_id = fingerprint(self.photo, snapshot(self.photo))
         Image.new("RGB", (48, 32), "green").save(self.photo)
         # UI reads authorize references without rereading the whole collection.
         self.assertEqual(len(self.project.list_media()), 2)
-        with self.assertRaisesRegex(ValueError, "content changed"):
-            self.project.approve(document)
-        with self.assertRaisesRegex(ValueError, "content changed"):
-            asyncio.run(self.project.create_editor("must-not-launch", approved=True))
         self.project.analyze()
-        self.assertIsNone(self.project.state["approved_hash"])
+        current_ids = {item["id"] for item in self.project.list_media()}
+        self.assertNotIn(old_id, current_ids)
+        self.assertIn(fingerprint(self.photo, snapshot(self.photo)), current_ids)
         private = self.root / "private"
         private.mkdir()
         Image.new("RGB", (20, 20), "red").save(private / "secret.png")
@@ -299,7 +272,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_ui_reads_do_not_hash_sources_or_group_all_media_per_entry(self):
         document = self.analyzed()
-        with patch("storylens.workflow.fingerprint", side_effect=AssertionError("UI read must not hash media")):
+        with patch("storylens.ingest.fingerprint", side_effect=AssertionError("UI read must not hash media")):
             self.assertEqual(self.project.load_storyboard(), document)
             indexed = self.project.list_media()
             with patch.object(Analyzer, "_storyboard_media", side_effect=AssertionError("per-item read must not group catalog")):
@@ -309,16 +282,6 @@ class WorkflowTests(unittest.TestCase):
                     self.assertEqual(item["paths"], row["paths"])
                     self.assertIn("analysis", item)
                     self.assertIn("feedback", item)
-
-    def test_approval_and_editor_gates_hash_each_source_only_once(self):
-        document = self.analyzed()
-        with patch("storylens.workflow.fingerprint", wraps=fingerprint) as hashing:
-            self.project.approve(document)
-            self.assertEqual(hashing.call_count, 2)
-        with patch("storylens.workflow.fingerprint", wraps=fingerprint) as hashing:
-            with self.assertRaisesRegex(ValueError, "Create an editor project"):
-                asyncio.run(self.project.preview_editor("must-not-launch", approved=True))
-            self.assertEqual(hashing.call_count, 2)
 
     def test_selection_applies_to_omitted_current_media_and_requires_regeneration(self):
         self.project.analyze()
@@ -340,7 +303,7 @@ class WorkflowTests(unittest.TestCase):
     def test_invalid_manifests_are_rejected_without_following_external_references(self):
         original = self.manifest()
         variants = []
-        for field, value in (("schema_version", "2.0"), ("unexpected", "field"), ("source", str(self.project.directory))):
+        for field, value in (("schema_version", "3.0"), ("unexpected", "field"), ("source", str(self.project.directory))):
             changed = deepcopy(original)
             changed[field] = value
             variants.append(changed)
@@ -350,10 +313,9 @@ class WorkflowTests(unittest.TestCase):
             changed = deepcopy(original)
             changed["config"][key] = value
             variants.append(changed)
-        for key, value in (("storyboard", "../secret.json"), ("approved_hash", "f" * 64),
+        for key, value in (("storyboard", "../secret.json"), ("unexpected", None),
                            ("analysis", {"status": [], "summary": None, "error": None}),
-                           ("analysis", {"status": "completed", "summary": {}, "error": None}),
-                           ("reports", ["/tmp/secret.json"])):
+                           ("analysis", {"status": "completed", "summary": {}, "error": None})):
             changed = deepcopy(original)
             changed["state"][key] = value
             variants.append(changed)
@@ -376,7 +338,7 @@ class WorkflowTests(unittest.TestCase):
     def test_symlinked_state_and_unrelated_catalog_are_rejected(self):
         outside = self.root / "outside"
         outside.mkdir()
-        link = self.project.directory / "outputs" / "secret"
+        link = self.project.directory / "storyboards" / "secret"
         link.symlink_to(outside, target_is_directory=True)
         with self.assertRaisesRegex(ValueError, "Unsafe project path"):
             Project.open(self.project.directory)
@@ -385,225 +347,67 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "catalog"):
             Project.open(self.project.directory)
 
-    def native_fixture(self):
+    def test_legacy_editor_state_is_dropped_without_deleting_project_files(self):
         document = self.analyzed()
-        self.project.approve(document)
-        native = self.project.directory / "outputs" / "fixture.fcproj"
-        native.write_text(json.dumps({"format": "filmcraft.project", "schema_version": 15,
-                                     "project": {"items": {"1": {"kind": {"Media": {
-                                         "media": {"File": {"path": str(self.photo)}}}}}}}}))
         manifest = self.manifest()
-        manifest["state"]["editor"] = {"path": "outputs/fixture.fcproj",
-                                         "storyboard_hash": self.project.state["approved_hash"]}
+        manifest["schema_version"] = "1.0"
+        old_files = {
+            "outputs/fixture.fcproj": b"legacy native project",
+            "outputs/preview.png": b"legacy preview",
+            "outputs/export.mp4": b"legacy export",
+            "reports/create.json": b'{"status":"succeeded"}',
+        }
+        for reference, content in old_files.items():
+            path = self.project.directory / reference
+            path.parent.mkdir(exist_ok=True)
+            path.write_bytes(content)
+        digest = "a" * 64
+        manifest["state"].update(
+            approved_hash=digest, approved_evidence=digest,
+            editor={"path": "outputs/fixture.fcproj", "storyboard_hash": digest},
+            preview={"path": "outputs/preview.png", "project_hash": digest},
+            export="outputs/export.mp4", reports=["reports/create.json"],
+            operation={"kind": "create", "status": "running", "report": "reports/create.json", "error": None},
+        )
         self.write_manifest(manifest)
-        self.project = Project.open(self.project.directory)
-        return native
-
-    def test_each_editor_operation_requires_explicit_consent_before_transport(self):
-        self.native_fixture()
-        with patch("storylens.filmcraft_transport.FilmCraft", side_effect=AssertionError("must not launch")):
-            for method in (self.project.create_editor, self.project.preview_editor, self.project.export_editor):
-                with self.subTest(method=method), self.assertRaisesRegex(ValueError, "separate explicit approval"):
-                    asyncio.run(method("untrusted-binary"))
-            with self.assertRaisesRegex(ValueError, "current successful preview"):
-                asyncio.run(self.project.export_editor("untrusted-binary", approved=True))
-        self.assertFalse(self.project.state["reports"])
-
-    def test_preview_export_reports_and_native_changes_require_fresh_preview(self):
-        native = self.native_fixture()
-        original = native.read_bytes()
-        with patch("storylens.filmcraft_transport.FilmCraft", FixtureFilmCraft):
-            preview = asyncio.run(self.project.preview_editor("fixture-editor", approved=True))
-            self.assertEqual(preview["status"], "succeeded")
-            preview_path = Path(preview["output"])
-            with Image.open(preview_path) as image:
-                self.assertEqual(image.size, (16, 16))
-            self.assertEqual(self.project.state["preview"]["project_hash"], hashlib.sha256(original).hexdigest())
-            exported = asyncio.run(self.project.export_editor("fixture-editor", approved=True))
-            self.assertEqual(exported["status"], "succeeded")
-            export_path = Path(exported["output"])
-            export_bytes = export_path.read_bytes()
-            native.write_bytes(original + b"\n")
-            with self.assertRaisesRegex(ValueError, "current successful preview"):
-                asyncio.run(self.project.export_editor("fixture-editor", approved=True))
-            newer = asyncio.run(self.project.preview_editor("fixture-editor", approved=True))
-            self.assertNotEqual(newer["output"], preview["output"])
-            self.assertTrue(preview_path.is_file())
-            self.assertEqual(export_path.read_bytes(), export_bytes)
-            exported_again = asyncio.run(self.project.export_editor("fixture-editor", approved=True))
-            self.assertNotEqual(exported_again["output"], exported["output"])
         reopened = Project.open(self.project.directory)
-        self.assertEqual(len(reopened.state["reports"]), 4)
-        for reference in reopened.state["reports"]:
-            self.assertFalse(Path(reference).is_absolute())
-            report = json.loads((reopened.directory / reference).read_text())
-            self.assertTrue(report["operations"])
-            self.assertEqual(Path(report["report_path"]), reopened.directory / reference)
+        self.assertEqual(set(reopened.state), {"analysis", "storyboard"})
+        self.assertEqual(reopened.load_storyboard(), document)
+        self.assertEqual(reopened.state["analysis"]["status"], "completed")
+        self.assertEqual(self.manifest()["state"], reopened.state)
+        self.assertEqual(self.manifest()["schema_version"], "2.0")
+        for reference, content in old_files.items():
+            self.assertEqual((reopened.directory / reference).read_bytes(), content)
+        self.assertEqual(Project.open(reopened.directory).state, reopened.state)
 
-    def test_failed_render_keeps_full_report_and_existing_output(self):
-        self.native_fixture()
-        preserved = self.project.directory / "outputs" / "keep.png"
-        Image.new("RGB", (10, 10), "blue").save(preserved)
-        before = preserved.read_bytes()
-        with patch("storylens.filmcraft_transport.FilmCraft", OfflineFilmCraft):
-            report = asyncio.run(self.project.preview_editor("fixture-editor", approved=True))
-        self.assertEqual(report["status"], "failed")
-        self.assertIn("offline", report["error"])
-        self.assertEqual(report["operations"][0]["id"], "media.status")
-        self.assertIsNone(self.project.state["preview"])
-        self.assertEqual(preserved.read_bytes(), before)
-        self.assertEqual(Project.open(self.project.directory).state["operation"]["status"], "failed")
-
-    def test_aggregate_tool_report_preserves_failed_state_beyond_input_document_limit(self):
-        self.analyzed()
-        storyboard = self.project.document_path
-        before = storyboard.read_bytes()
-        output = self.project.directory / "outputs" / "never-created.fcproj"
-
-        async def failed_operation():
-            # Each result is below the editor transport limit, while their
-            # aggregate report legitimately exceeds the input-document limit.
-            return {"schema_version": "1.0", "status": "failed", "error": "second command failed",
-                    "operations": [{"result": {"diagnostic": "a" * 1200000}},
-                                   {"result": {"diagnostic": "b" * 1200000}}]}
-
-        def unexpected_success():
-            self.fail("A failed native operation must not publish success state")
-
-        report = asyncio.run(self.project._operation("create", output, failed_operation, unexpected_success))
+    def test_legacy_editor_references_are_ignored_not_followed(self):
+        manifest = self.manifest()
+        manifest["schema_version"] = "1.0"
+        outside = self.root / "private.json"
+        outside.write_bytes(b"unrelated private data")
+        manifest["state"].update(
+            approved_hash="a" * 64, approved_evidence="b" * 64,
+            editor={"path": str(outside), "storyboard_hash": "a" * 64},
+            preview={"path": "../private.json", "project_hash": "b" * 64},
+            export=str(outside), reports=[str(outside)],
+            operation={"kind": "export", "status": "running", "report": str(outside), "error": None},
+        )
+        self.write_manifest(manifest)
         reopened = Project.open(self.project.directory)
-        operation = reopened.state["operation"]
-        self.assertEqual(operation["status"], "failed")
-        self.assertEqual(operation["error"], "second command failed")
-        self.assertGreater((reopened.directory / operation["report"]).stat().st_size, MAX_JSON_BYTES)
-        self.assertEqual(storyboard.read_bytes(), before)
-        self.assertFalse(output.exists())
+        self.assertEqual(set(reopened.state), {"analysis", "storyboard"})
+        self.assertEqual(outside.read_bytes(), b"unrelated private data")
+        self.assertEqual(self.manifest()["state"], reopened.state)
 
-    def test_successful_editor_creation_is_versioned_and_review_changes_detach_old_native(self):
+    def test_invalid_storyboard_does_not_replace_current_version(self):
         document = self.analyzed()
-        self.project.approve(document)
-        with patch("storylens.filmcraft_transport.FilmCraft", AssemblingFilmCraft):
-            first = asyncio.run(self.project.create_editor("fixture-editor", approved=True))
-            second = asyncio.run(self.project.create_editor("fixture-editor", approved=True))
-        self.assertEqual(first["status"], "succeeded")
-        self.assertEqual(second["status"], "succeeded")
-        first_path, second_path = Path(first["project"]), Path(second["project"])
-        self.assertNotEqual(first_path, second_path)
-        self.assertTrue(first_path.is_file())
-        self.assertTrue(second_path.is_file())
-        self.assertEqual(self.project.directory / self.project.state["editor"]["path"], second_path)
-        saved = json.loads(second_path.read_text())
-        self.assertEqual(len(saved["project"]["items"]), 2)
-        for item in saved["project"]["items"].values():
-            self.assertTrue(Path(item["kind"]["Media"]["media"]["File"]["path"]).is_relative_to(self.source))
-        preserved = second_path.read_bytes()
-        document["title"] = "A new review"
-        self.project.save_storyboard(document)
-        self.assertIsNone(self.project.state["editor"])
-        self.assertEqual(second_path.read_bytes(), preserved)
-        self.assertEqual(len(Project.open(self.project.directory).state["reports"]), 2)
-
-    def test_missing_editor_records_failure_without_retry_or_losing_storyboard(self):
-        document = self.analyzed()
-        self.project.approve(document)
-        storyboard = self.project.document_path.read_bytes()
-        with self.assertRaises((OSError, RuntimeError, ValueError)):
-            asyncio.run(self.project.create_editor(str(self.root / "missing-editor"), approved=True))
-        reopened = Project.open(self.project.directory)
-        self.assertEqual(reopened.state["operation"]["status"], "failed")
-        self.assertEqual(len(reopened.state["reports"]), 1)
-        self.assertIsNone(reopened.state["editor"])
-        self.assertEqual(reopened.document_path.read_bytes(), storyboard)
-
-
-class FixtureFilmCraft:
-    """External transport boundary: real adapter still validates and publishes files."""
-
-    def __init__(self, executable, *, project=None, timeout=30):
-        self.project = project
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *args):
-        pass
-
-    async def discover(self):
-        return {"server": {"name": "filmcraft", "version": "0.9.0"},
-                "tools": [{"name": name} for name in
-                          ("command_run", "media_import", "project_inspect", "sequence_inspect")],
-                "command_list": [{"id": name} for name in
-                                 ("file.exportFrame", "file.exportMedia", "media.status")]}
-
-    async def call(self, tool, arguments, *, allow_null=False):
-        if tool == "sequence_inspect":
-            return {"duration": 8 * TICKS}
-        command = arguments["id"]
-        if command == "media.status":
-            return [{"item": "1", "status": "online"}]
-        path = Path(arguments["params"]["path"])
-        if command == "file.exportFrame":
-            Image.new("RGB", (16, 16), "green").save(path)
-        elif command == "file.exportMedia":
-            path.write_bytes(b"external-render-boundary-output")
-        else:
-            raise AssertionError("Unexpected editor command: " + command)
-        return {}
-
-
-class OfflineFilmCraft(FixtureFilmCraft):
-    async def call(self, tool, arguments, *, allow_null=False):
-        if tool == "command_run" and arguments["id"] == "media.status":
-            return [{"item": "1", "status": "offline"}]
-        return await super().call(tool, arguments)
-
-
-class AssemblingFilmCraft(FixtureFilmCraft):
-    saved = {}
-
-    def __init__(self, executable, *, project=None, timeout=30):
-        super().__init__(executable, project=project, timeout=timeout)
-        self.imported = {}
-        self.sequence = deepcopy(self.saved.get(str(project), {
-            "settings": {"frame_rate": {"num": 24, "den": 1}}, "id": 7,
-            "video": [{"items": []}], "audio": [], "duration": 0}))
-
-    async def discover(self):
-        result = await super().discover()
-        result["command_list"].extend({"id": name} for name in
-                                      ("file.newSequence", "timeline.place", "timeline.select",
-                                       "clip.scaleToFrameSize", "file.saveAs"))
-        return result
-
-    async def call(self, tool, arguments, *, allow_null=False):
-        if tool == "sequence_inspect":
-            return deepcopy(self.sequence)
-        if tool == "media_import":
-            key = str(len(self.imported) + 1)
-            self.imported[key] = arguments["paths"][0]
-            return {"items": [key]}
-        if tool == "project_inspect":
-            return {"root": {"children": [{"item": key, "duration": 0} for key in self.imported]}}
-        command, params = arguments["id"], arguments["params"]
-        if command == "file.newSequence":
-            return {"sequence": 7}
-        if command == "timeline.place":
-            clips = self.sequence["video"][0]["items"]
-            key = "clip-" + str(len(clips) + 1)
-            clips.append({"clip": key, "item": params["item"], "start": params["time"],
-                          "end": params["time"] + params["duration"], "sourceIn": params["sourceIn"],
-                          "sourceOut": params["sourceIn"] + params["duration"],
-                          "speed": 1, "reverse": False, "enabled": True})
-            self.sequence["duration"] = max(self.sequence["duration"], clips[-1]["end"])
-            return {"clips": [key]}
-        if command in {"timeline.select", "clip.scaleToFrameSize"}:
-            return None if command == "clip.scaleToFrameSize" else {}
-        if command == "file.saveAs":
-            path = Path(params["path"])
-            path.write_text(json.dumps({"format": "filmcraft.project", "schema_version": 15,
-                                        "project": {"items": {
-                                            key: {"kind": {"Media": {"media": {"File": {"path": source}}}}}
-                                            for key, source in self.imported.items()}}}))
-            self.saved[str(path)] = deepcopy(self.sequence)
-            return {}
-        raise AssertionError("Unexpected editor operation: " + tool + " " + command)
+        current = self.project.document_path
+        original = current.read_bytes()
+        manifest = (self.project.directory / "project.json").read_bytes()
+        invalid = deepcopy(document)
+        invalid["items"][0]["media_id"] = "f" * 64
+        with self.assertRaises(ValueError):
+            self.project.save_storyboard(invalid)
+        self.assertEqual(self.project.document_path, current)
+        self.assertEqual(current.read_bytes(), original)
+        self.assertEqual((self.project.directory / "project.json").read_bytes(), manifest)
+        self.assertEqual(Project.open(self.project.directory).load_storyboard(), document)

@@ -2,9 +2,9 @@
 
 Local-first, editor-independent media intelligence. MIT licensed; free to self-host.
 
-Current package: 0.10.0 — a guided terminal workflow over editor-independent media analysis, events/corrections and portable storyboards, optional FilmCraft 0.9.0 exchange, and release/benchmark tooling. Run `storylens` in a terminal to create or resume a local project. Sources remain read-only. Opt-in local models provide retrieval, captions and transcription; technical-only is the wizard default even when model paths are configured. No automatic model downloads, cloud fallback, telemetry, subscriptions or accounts.
+Current package: 0.10.0 — local media analysis, events/corrections, portable storyboards and release/benchmark tooling, with a loopback browser wizard for analysis and handoff. Run `storylens` to create or resume a separate private local project. Sources remain read-only. The browser path uses technical analysis without AI inference; optional local models remain available through the analysis APIs and scriptable commands. No automatic model downloads, cloud fallback, telemetry, subscriptions or accounts.
 
-Editable JSON storyboards work without an editor. The optional [FilmCraft workflow](docs/USAGE.md#optional-filmcraft-interchange-m8) discovers real tools, creates a new approved project, imports saved source transcripts, previews and exports; it never edits an existing project in place. See [architecture](ARCHITECTURE.md), [milestones](docs/IMPLEMENTATION_PLAN.md), and primary-source research for [components](docs/research/media-ecosystem.md), [existing applications](docs/research/existing-applications.md), and [FilmCraft/MCP](docs/research/filmcraft-mcp.md).
+Editable JSON storyboards work without an editor. For creative decisions and editing, the wizard supplies a StoryLens MCP configuration snippet and a prompt to copy to your existing AI host. Your agent uses StoryLens evidence and calls the official FilmCraft MCP directly; StoryLens does not run an agent, launch FilmCraft, create native editor projects or render/export movies. See [handoff and consent](docs/INTEGRATIONS.md#agent-handoff-and-media-consent), [architecture](ARCHITECTURE.md), [milestones](docs/IMPLEMENTATION_PLAN.md), and primary-source research for [components](docs/research/media-ecosystem.md), [existing applications](docs/research/existing-applications.md), and [FilmCraft/MCP](docs/research/filmcraft-mcp.md).
 
 ## Installation
 
@@ -25,7 +25,7 @@ Optional HEIF support: `python -m pip install -e '.[heif]'` from a checkout, or 
 
 ## Quick start
 
-With the environment activated, start the guided terminal workflow:
+With the environment activated, open the local browser wizard:
 
 ~~~sh
 storylens
@@ -34,9 +34,32 @@ storylens wizard
 storylens wizard --project "$HOME/storylens-projects/holiday"
 ~~~
 
-The wizard asks for a mixed-media folder and a separate local project directory, checks prerequisites, runs analysis with progress, recommends a target-duration storyboard and guides review/editing. Local JPEG contact sheets show source images/scene references; they are not a rendered film. An optional FilmCraft path creates a new project, renders a preview and exports only with separate approvals. Interrupted analysis resumes from stage caches; existing projects reopen their saved storyboards rather than silently replacing edits. [Wizard controls and safety](docs/USAGE.md#guided-project-wizard).
+The wizard asks for a mixed-media folder and a separate local project directory, checks prerequisites, and runs local metadata/technical analysis with progress and results. Interrupted analysis can reuse completed stage caches. It then provides a StoryLens MCP server snippet pointing at that project's catalog and a prompt to copy into your existing MCP-capable agent. [Wizard operation](docs/USAGE.md#guided-project-wizard).
 
-A browser GUI is a later stage, not currently served or launched automatically. Project orchestration is separate from terminal prompts so a future frontend can reuse the same source, cache, state and approval logic.
+The browser page is served on `127.0.0.1` only; the terminal prints its private session URL if automatic opening is unavailable. Keep the process running while using it, and stop it with Ctrl-C. Media-inspection permission in the copied prompt is opt-in and does not authorize cloud sharing: separately approve any disclosure of media or private analysis to your host's provider. The wizard does not connect to your agent or FilmCraft.
+
+### Connect your existing MCP host
+
+Install the optional server dependency in the same environment:
+
+~~~sh
+python -m pip install -e '.[mcp]'
+~~~
+
+Copy the wizard's generated configuration into your host. For example, a project at `/absolute/local/holiday` analyzing `/absolute/media` uses:
+
+~~~json
+{
+  "mcpServers": {
+    "storylens": {
+      "command": "/absolute/venv/bin/storylens",
+      "args": ["--database", "/absolute/local/holiday/catalog.sqlite3", "serve", "--allow-root", "/absolute/media"]
+    }
+  }
+}
+~~~
+
+Replace all paths with the actual trusted executable, project and source paths. This starts StoryLens's stdio MCP server when your host needs it; it does not start the browser or FilmCraft. Configure the official FilmCraft MCP separately in that host, then review and send the copied handoff prompt. [Codex/Claude configuration and consent](docs/INTEGRATIONS.md#mcp-setup-for-codex-and-claude-code).
 
 ### Scriptable commands
 
@@ -91,11 +114,11 @@ The output is editable JSON, not a rendered film: change title, playback order, 
 
 - [CLI, configuration, media formats, privacy and NAS operation](docs/USAGE.md)
 - [JSON contract](docs/API.md) and [packaged JSON Schemas](src/storylens/schemas/)
-- [AI/provider, MCP-host and optional FilmCraft boundaries](docs/INTEGRATIONS.md)
+- [AI/provider, MCP-host and FilmCraft handoff boundaries](docs/INTEGRATIONS.md)
 - [Reproducible distribution, dependency license inventory and release gates](docs/RELEASE.md)
 - [Security](SECURITY.md), [contributing](CONTRIBUTING.md), [changelog](CHANGELOG.md)
 
-No HTTP listener or editor dependency is introduced. `storylens serve --allow-root /mounted/media` runs the optional local MCP stdio transport; [host setup](docs/INTEGRATIONS.md#mcp-setup-for-codex-and-claude-code) requires a trusted executable, local catalog and explicit approved roots.
+The wizard's loopback HTTP listener is separate from the optional MCP stdio transport. Install the MCP extra before registering StoryLens with your host; use the wizard's generated snippet or the [host setup examples](docs/INTEGRATIONS.md#mcp-setup-for-codex-and-claude-code), with a trusted executable, the project's local catalog and explicit approved source roots.
 
 ## Development and verification
 
@@ -109,6 +132,6 @@ Linux/macOS/Windows core/media checks passed across Python 3.11/3.12 in GitHub A
 
 M7 was exercised on Linux with generated-media CLI and installed-wheel smokes, plus real MCP SDK subprocesses returning 111 lossless storyboard entries, rejecting unauthorized/mixed-root sources and failing explicitly on oversized documents. Conversation preservation is timestamp-based, not a claim of semantic accuracy; no new real-model query inference, cross-platform M7 runtime or editor export was exercised.
 
-M8 headless interoperability was exercised on Linux with the checksum-verified official FilmCraft 0.9.0 release and MCP 2.3: real tool discovery, new-project assembly, save/reopen, source transcript import, PNG review and H.264/AAC export. Generated fixtures covered a 5-second source origin, images/audio/video and 24000/1001 timing. Desktop bridge use, private holiday-media/user review and other editor/platform versions remain unverified.
+Historical M8 evidence: the now-removed package-owned adapter was exercised on Linux with the checksum-verified FilmCraft 0.9.0 release and MCP 2.3, including generated-media assembly, saved transcripts, rendering and export. This is not current adapter support or verification of your host's FilmCraft setup; see the [historical record](CHANGELOG.md#080--2026-10-18-m8-optional-filmcraft-interchange).
 
 M9 adds [isolated collection benchmarks/profiles, bounded FIFO batches, conservative CUDA admission and optional Docker operation](docs/USAGE.md#release-operation-and-profiling-m9). It does not certify real NAS throughput, GPU capacity or private-media quality; those acceptance runs are deferred until implementation is complete.
