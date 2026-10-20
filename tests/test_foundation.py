@@ -154,7 +154,7 @@ class FoundationTests(unittest.TestCase):
 
     def test_configuration_precedence_and_invalid_values(self):
         self.assertEqual(Config(self.base / "defaults.sqlite3").timeout, 600)
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {"LOCALAPPDATA": str(self.base)}, clear=True):
             self.assertEqual(load_config().timeout, 600)
         config = self.base / "config.toml"
         config.write_text('[storylens]\ndatabase="' + (self.base / "catalog.sqlite3").as_posix() +
