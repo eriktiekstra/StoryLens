@@ -4,8 +4,9 @@ The manifest records project intent and references, not authority. Project
 catalogs and analysis artifacts stay separate from the read-only source.
 """
 
+from concurrent.futures import CancelledError
 from copy import deepcopy
-from dataclasses import asdict, fields
+from dataclasses import asdict, fields, replace
 import fnmatch
 import importlib.util
 import hashlib
@@ -25,13 +26,19 @@ from .ingest import discover, kind
 from .service import Analyzer
 
 VERSION = "1.0"
-PROJECT_VERSION = "2.0"
+PROJECT_VERSION = "3.0"
 MAX_JSON_BYTES = 2 * 1024 * 1024
 MAX_MEDIA = 10000
 _DIRECTORIES = ("storyboards", "review", "catalog.artifacts")
-_STATE_KEYS = {"analysis", "storyboard"}
+_STATE_KEYS = {"analysis", "technical", "ai", "storyboard"}
+_AI_FIELDS = {"embedding_model", "vision_model", "ollama_endpoint", "semantic_timeout",
+              "audio_transcription_model", "audio_transcription_device", "audio_transcription_language"}
 _LEGACY_STATE_KEYS = {"analysis", "storyboard", "approved_hash", "approved_evidence", "editor",
                       "preview", "export", "reports", "operation"}
+
+
+def _empty_analysis():
+    return {"status": "not_started", "summary": None, "error": None}
 
 
 def _json_bytes(document, *, limit=MAX_JSON_BYTES):
@@ -120,17 +127,12 @@ def _configuration(values, database, mode, depth):
         raise ValueError("audio_transcription_device must be cpu or cuda")
     if len(values["audio_transcription_language"]) > 32:
         raise ValueError("audio_transcription_language is too long")
-    if mode == "technical" and any(values[name] for name in
-                                    ("embedding_model", "vision_model", "audio_transcription_model")):
-        raise ValueError("Technical projects cannot enable model inference")
-    if depth == "fast" and values["vision_model"]:
-        raise ValueError("Fast projects cannot enable vision inference")
-    if mode == "technical" or depth == "fast" or not values["vision_model"]:
-        if values["ollama_endpoint"] != defaults.ollama_endpoint:
-            raise ValueError("Unused vision configuration must use the default loopback endpoint")
-    else:
+    if depth == "fast" and values["vision_model"] and mode == "local-ai":
+        raise ValueError("Choose standard or deep depth to enable vision inference")
+    if values["vision_model"] or values["ollama_endpoint"] != defaults.ollama_endpoint:
         from .providers import OllamaVision
-        OllamaVision(values["ollama_endpoint"], values["vision_model"], values["semantic_timeout"])
+        OllamaVision(values["ollama_endpoint"], values["vision_model"] or "configuration-check",
+                     values["semantic_timeout"])
     return Config(database=database, **dict(values, exclusions=tuple(values["exclusions"])))
 
 
@@ -178,21 +180,25 @@ def preflight(source: Path, config: Config, *, mode="technical", depth="fast") -
     if counts["video"] or counts["audio"]:
         result["warnings"].append(
             f"External-tool timeout for this project: {config.timeout:g}s. Large/complex videos may exceed it; "
-            "set STORYLENS_TIMEOUT before creating a project. Existing projects retain their saved timeout.")
+            "change timeout in project settings before retrying. Existing projects retain their saved timeout.")
     if mode == "local-ai":
-        if counts["image"] or counts["video"]:
-            model = Path(config.embedding_model).expanduser() if config.embedding_model else None
-            if model is None or not model.is_dir() or not (model / "config.json").is_file():
-                result["errors"].append("Local AI requires an installed embedding model directory with config.json")
-            if depth != "fast":
-                from .providers import OllamaVision
-                try:
-                    OllamaVision(config.ollama_endpoint, config.vision_model, config.semantic_timeout)
-                except ValueError as error:
-                    result["errors"].append(str(error))
-                result["warnings"].append("Vision model installation is checked by the local runtime during analysis; no model is downloaded.")
+        if not any((config.embedding_model, config.vision_model, config.audio_transcription_model)):
+            result["errors"].append("Choose at least one local AI capability: embeddings, vision or speech transcription")
+        if config.embedding_model:
+            model = Path(config.embedding_model).expanduser()
+            if not model.is_dir() or not (model / "config.json").is_file():
+                result["errors"].append("Embeddings need an installed local model directory containing config.json; configure its path or disable embeddings")
+        if config.vision_model:
+            from .providers import OllamaVision
+            try:
+                if depth == "fast":
+                    raise ValueError("Choose standard or deep depth for vision")
+                OllamaVision(config.ollama_endpoint, config.vision_model, config.semantic_timeout)
+            except ValueError as error:
+                result["errors"].append(str(error))
+            result["warnings"].append("Start Ollama and install the selected vision model explicitly; analysis never downloads models.")
         if config.audio_transcription_model and not Path(config.audio_transcription_model).expanduser().is_dir():
-            result["errors"].append("Transcription requires an installed local model directory")
+            result["errors"].append("Speech transcription needs an installed local model directory; configure its path or disable speech")
     return result
 
 
@@ -214,6 +220,8 @@ class Project:
     def __init__(self, directory, source, config, mode, depth, state):
         self.directory, self.source, self.config = directory, source, config
         self.mode, self.depth, self._state = mode, depth, state
+        self.started_at = None
+        self.activity = ""
         self._manifest_hash = None
 
     @property
@@ -256,8 +264,8 @@ class Project:
         directory.mkdir(mode=0o700)
         for name in _DIRECTORIES:
             (directory / name).mkdir(mode=0o700)
-        state = {"analysis": {"status": "not_started", "summary": None, "error": None},
-                 "storyboard": None}
+        state = {"analysis": _empty_analysis(), "technical": _empty_analysis(),
+                 "ai": _empty_analysis(), "storyboard": None}
         project = cls(directory, source, config, mode, depth, state)
         with Analyzer(config):
             pass
@@ -274,7 +282,7 @@ class Project:
         document = _read_json(manifest)
         if document.keys() != {"schema_version", "kind", "source", "mode", "depth", "config", "state"}:
             raise ValueError("Invalid project manifest fields")
-        if document["schema_version"] not in (VERSION, PROJECT_VERSION) or document["kind"] != "storylens_project":
+        if document["schema_version"] not in (VERSION, "2.0", PROJECT_VERSION) or document["kind"] != "storylens_project":
             raise ValueError("Unsupported project kind or schema_version")
         _options(document["mode"], document["depth"])
         if not isinstance(document["source"], str):
@@ -286,22 +294,52 @@ class Project:
         _separate(directory, source)
         config = _configuration(document["config"], directory / "catalog.sqlite3", document["mode"], document["depth"])
         saved_state = document["state"]
+        legacy_ai = False
         migrated = (document["schema_version"] != PROJECT_VERSION
                     or (isinstance(saved_state, dict) and saved_state.keys() == _LEGACY_STATE_KEYS))
         if isinstance(saved_state, dict) and saved_state.keys() == _LEGACY_STATE_KEYS:
             saved_state = {"analysis": saved_state["analysis"], "storyboard": saved_state["storyboard"]}
+        if (document["schema_version"] in (VERSION, "2.0") and isinstance(saved_state, dict)
+                and saved_state.keys() == {"analysis", "storyboard"}):
+            # Old technical projects have an exact basic summary. A legacy AI
+            # run mixed basic and model stages, so only claim basic success when
+            # its complete scan reported no basic failures.
+            previous = deepcopy(saved_state["analysis"])
+            saved_state = dict(saved_state, technical=_empty_analysis(), ai=_empty_analysis())
+            if document["mode"] == "technical":
+                saved_state["technical"] = previous
+            else:
+                saved_state["ai"] = previous
+                legacy_ai = True
+            migrated = True
         project = cls(directory, source, config, document["mode"], document["depth"], saved_state)
         project._manifest_hash = _hash(document)
         project._layout()
         project._validate_state()
+        if legacy_ai:
+            analysis = project._state["ai"]
+            summary = analysis["summary"]
+            if summary is not None and analysis["status"] in {"completed", "partial"}:
+                basic_errors = [error for error in summary["errors"]
+                                if error["stage"] not in {"semantic_embeddings", "semantic_vision", "audio_transcription"}]
+                metadata = summary["stages"].get("metadata", {})
+                metadata_count = metadata.get("analyzed", 0) + metadata.get("cache_hits", 0)
+                technical_count = sum(counts["analyzed"] + counts["cache_hits"]
+                                      for name, counts in summary["stages"].items()
+                                      if name in {"image_technical", "video_technical", "audio_technical"})
+                if (not basic_errors and not summary["errors_truncated"]
+                        and summary["discovered"] == summary["indexed"]
+                        and metadata_count == technical_count == summary["indexed"]):
+                    project._state["technical"] = {"status": "completed", "summary": None, "error": None}
         if not config.database.is_file():
             raise ValueError("Project-local catalog is missing")
         project._validate_catalog()
         # A killed process cannot honestly remain 'running' after a new UI opens it.
         changed = migrated
-        if project._state["analysis"]["status"] == "running":
-            project._state["analysis"].update(status="interrupted", error="Previous analysis did not finish; cached stages can be resumed")
-            changed = True
+        for operation in ("analysis", "technical", "ai"):
+            if project._state[operation]["status"] == "running":
+                project._state[operation].update(status="interrupted", error="Previous analysis did not finish; cached stages can be resumed")
+                changed = True
         if changed:
             project._persist()
         return project
@@ -350,14 +388,15 @@ class Project:
         state = self._state
         if not isinstance(state, dict) or state.keys() != _STATE_KEYS:
             raise ValueError("Invalid project state fields")
-        analysis = state["analysis"]
-        if (not isinstance(analysis, dict) or analysis.keys() != {"status", "summary", "error"}
-                or analysis["status"] not in ("not_started", "running", "completed", "partial", "interrupted", "failed")
-                or (analysis["summary"] is not None and not isinstance(analysis["summary"], dict))
-                or (analysis["error"] is not None and not isinstance(analysis["error"], str))):
-            raise ValueError("Invalid project analysis state")
-        if analysis["summary"] is not None:
-            self._validate_summary(analysis["summary"])
+        for operation in ("analysis", "technical", "ai"):
+            analysis = state[operation]
+            if (not isinstance(analysis, dict) or analysis.keys() != {"status", "summary", "error"}
+                    or analysis["status"] not in ("not_started", "running", "completed", "partial", "interrupted", "failed")
+                    or (analysis["summary"] is not None and not isinstance(analysis["summary"], dict))
+                    or (analysis["error"] is not None and not isinstance(analysis["error"], str))):
+                raise ValueError("Invalid project analysis state")
+            if analysis["summary"] is not None:
+                self._validate_summary(analysis["summary"])
         if state["storyboard"] is not None:
             self._path(state["storyboard"], "storyboards", ".json")
     def _validate_catalog(self):
@@ -406,6 +445,12 @@ class Project:
                 raise ValueError("Project manifest already exists")
         elif _hash(_read_json(manifest)) != self._manifest_hash:
             raise ValueError("Project changed in another session; reopen it before continuing")
+        # Catalog creates SQLite sidecars with the process umask; their enclosing
+        # directory is already private, and these permissions persist on reopen.
+        for name in ("catalog.sqlite3", "catalog.sqlite3-wal", "catalog.sqlite3-shm", "catalog.feedback.sqlite3"):
+            path = self.directory / name
+            if path.is_file():
+                path.chmod(0o600)
         values = asdict(self.config)
         values.pop("database")
         raw = _json_bytes({"schema_version": PROJECT_VERSION, "kind": "storylens_project", "source": str(self.source),
@@ -420,12 +465,6 @@ class Project:
             self._manifest_hash = hashlib.sha256(raw).hexdigest()
         finally:
             Path(temporary).unlink(missing_ok=True)
-        # Catalog creates SQLite sidecars with the process umask; their enclosing
-        # directory is already private, and these permissions persist on reopen.
-        for name in ("catalog.sqlite3", "catalog.sqlite3-wal", "catalog.sqlite3-shm", "catalog.feedback.sqlite3"):
-            path = self.directory / name
-            if path.is_file():
-                path.chmod(0o600)
 
     def _new_path(self, folder, name, suffix):
         self._layout()
@@ -511,47 +550,182 @@ class Project:
             item["transcript"] = app.catalog.transcript(media_id)
             return item
 
-    def analyze(self, progress=None):
-        self._layout()
-        self._state["analysis"] = {"status": "running", "summary": None, "error": None}
-        self._persist()
-        last_save = time.monotonic()
+    def configure(self, **settings):
+        """Atomically save validated settings without removing catalog evidence."""
+        values = asdict(self.config)
+        values.pop("database")
+        unknown = settings.keys() - (values.keys() | {"mode", "depth"})
+        if unknown:
+            raise ValueError("Unknown project settings: " + ", ".join(sorted(unknown)))
+        mode = settings.pop("mode", None)
+        depth = settings.pop("depth", None)
+        values.update(settings)
+        for name in ("embedding_model", "audio_transcription_model"):
+            if isinstance(values[name], str) and values[name]:
+                values[name] = str(Path(values[name]).expanduser().resolve())
+        if mode is None:
+            mode = "local-ai" if any(values[name] for name in
+                                    ("embedding_model", "vision_model", "audio_transcription_model")) else "technical"
+        if depth is None:
+            depth = "standard" if values["vision_model"] and mode == "local-ai" else "fast"
+        _options(mode, depth)
+        configured = _configuration(values, self.config.database, mode, depth)
+        previous = self.config, self.mode, self.depth, deepcopy(self._state)
+        changed = {field.name for field in fields(Config)
+                   if getattr(self.config, field.name) != getattr(configured, field.name)}
+        basic_changed = bool(changed - _AI_FIELDS - {"timeout", "trust_stat"})
+        ai_changed = bool(changed - {"trust_stat"}) or depth != self.depth or mode != self.mode
+        self.config, self.mode, self.depth = configured, mode, depth
+        if basic_changed:
+            self._state["technical"] = _empty_analysis()
+        if ai_changed:
+            self._state["ai"] = _empty_analysis()
+        if basic_changed or ai_changed:
+            self._state["analysis"] = deepcopy(self._state["technical"])
+        try:
+            self._persist()
+        except BaseException:
+            self.config, self.mode, self.depth, self._state = previous
+            raise
+        return self.state
 
+    def analysis_status(self, operation):
+        if operation not in ("technical", "ai"):
+            raise ValueError("operation must be technical or ai")
+        return deepcopy(self._state[operation])
+
+    def analyze(self, progress=None, *, operation="all", cancelled=None):
+        """Run basic analysis and/or optional models, reusing successful stages.
+
+        Model setup never gates basic results. Each pass has its own persisted
+        status; the legacy ``analysis`` entry tracks the most recent pass.
+        """
+        if operation not in ("technical", "ai", "all"):
+            raise ValueError("operation must be technical, ai or all")
+        if cancelled is not None and not callable(cancelled):
+            raise ValueError("cancelled must be a callable")
+        enabled = self.mode == "local-ai" and any(
+            (self.config.embedding_model, self.config.vision_model, self.config.audio_transcription_model))
+        if operation == "ai" and not enabled:
+            raise ValueError("Enable at least one local AI capability in project settings before AI analysis")
+        self._layout()
+        # One scan establishes current basic prerequisites and optional models.
+        # Its independent basic summary keeps model failures from erasing basic
+        # success without rediscovering or hashing the collection a second time.
+        current = "ai" if operation != "technical" and enabled else "technical"
+        last_save = time.monotonic()
+        self.started_at = last_save
+        self.activity = "Checking project"
+
+        previous_technical = self.analysis_status("technical") if current == "ai" else None
+        technical_updated = previous_technical is not None and previous_technical["status"] != "completed"
+        self._state[current] = {"status": "running", "summary": None, "error": None}
+        self._state["analysis"] = deepcopy(self._state[current])
+        if technical_updated:
+            self._state["technical"] = {"status": "running", "summary": None, "error": None}
+        self._persist()
+        
         def checkpoint(summary):
-            nonlocal last_save
+            nonlocal last_save, technical_updated
+            self._state[current]["summary"] = deepcopy(summary)
             self._state["analysis"]["summary"] = deepcopy(summary)
+            if current == "technical" and (
+                    summary["failed"] or any(counts["analyzed"] for counts in summary["stages"].values())):
+                self._state["ai"] = _empty_analysis()
+            if current == "ai":
+                basic = app.basic_summary
+                technical_updated = technical_updated or bool(basic["failed"]) or any(
+                    counts["analyzed"] or counts["failed"] for counts in basic["stages"].values())
+                if technical_updated:
+                    self._state["technical"] = {"status": "running", "summary": deepcopy(basic), "error": None}
             if summary["discovered"] > MAX_MEDIA:
                 raise ValueError("Projects support at most 10000 current media files")
+            self.activity = app.activity or ("Local AI" if current == "ai" else "Basic analysis")
             if time.monotonic() - last_save >= 1:
                 self._persist()
                 last_save = time.monotonic()
             if progress is not None:
                 progress(deepcopy(summary))
-
+        
         try:
-            checked = preflight(self.source, self.config, mode=self.mode, depth=self.depth)
+            if cancelled is not None and cancelled():
+                raise CancelledError("Analysis cancelled; completed stages are saved and can be resumed")
+            # Model paths/runtime failures belong to their individual
+            # stages, not a global gate that disables other capabilities.
+            checked = preflight(self.source, self.config, mode="technical", depth="fast")
             if checked["errors"]:
                 raise ValueError("Preflight failed: " + "; ".join(checked["errors"]))
-            with Analyzer(self.config) as app:
-                # Analysis repairs changed IDs, but must never absorb foreign
-                # catalog references. Check the catalog roots without stale hashes.
+            config = self.config if current == "ai" else replace(
+                self.config, embedding_model="", vision_model="", audio_transcription_model="")
+            with Analyzer(config) as app:
                 for row in app.catalog.connection.execute("SELECT path FROM paths"):
                     path = Path(row["path"])
                     if path.exists() or path.is_symlink():
                         if not path.is_absolute() or path.resolve() != path or not path.is_relative_to(self.source):
                             raise ValueError("Catalog contains a source outside the approved project source")
                         _no_symlinks(path)
-                summary = app.scan(self.source, analyze=True, stage="all",
-                                   depth=self.depth if self.mode == "local-ai" else None,
-                                   checkpoint=checkpoint)
-            self._state["analysis"].update(status="partial" if summary["failed"] else "completed", summary=deepcopy(summary))
+                summary = app.scan(self.source, analyze=True, stage="ai" if current == "ai" else "all",
+                                   depth=self.depth if current == "ai" else None,
+                                   checkpoint=checkpoint, cancelled=cancelled)
+                if current == "ai":
+                    basic = app.basic_summary
+                    old_summary = previous_technical["summary"]
+                    if (technical_updated or previous_technical["status"] != "completed"
+                            or old_summary is None
+                            or basic["discovered"] != old_summary["discovered"]
+                            or basic["indexed"] != old_summary["indexed"]):
+                        self._state["technical"] = {
+                            "status": "partial" if basic["failed"] else "completed",
+                            "summary": deepcopy(basic), "error": None}
+            self._state[current].update(status="partial" if summary["failed"] else "completed",
+                                        summary=deepcopy(summary), error=None)
+            self._state["analysis"] = deepcopy(self._state[current])
         except BaseException as error:
-            interrupted = isinstance(error, (KeyboardInterrupt, SystemExit)) or type(error).__name__ == "CancelledError"
-            self._state["analysis"].update(status="interrupted" if interrupted else "failed", error=str(error)[:2000] or type(error).__name__)
+            interrupted = isinstance(error, (KeyboardInterrupt, SystemExit, CancelledError)) or type(error).__name__ == "CancelledError"
+            self._state[current].update(status="interrupted" if interrupted else "failed",
+                                        error=str(error)[:2000] or type(error).__name__)
+            if current == "ai" and technical_updated:
+                self._state["technical"].update(status="interrupted" if interrupted else "failed",
+                                                error=str(error)[:2000] or type(error).__name__)
+            self._state["analysis"] = deepcopy(self._state[current])
+            self.activity = "Interrupted" if interrupted else "Failed"
             self._persist()
             raise
         self._persist()
+        self.activity = "Analysis complete"
         return summary
+
+    def diagnostics(self):
+        """Write an explicit, private local diagnostic report; never transmit it."""
+        import re
+        from urllib.parse import urlsplit, urlunsplit
+
+        def safe_url(match):
+            try:
+                url = urlsplit(match.group())
+                host = url.hostname or ""
+                if ":" in host:
+                    host = "[" + host + "]"
+                if url.port:
+                    host += ":" + str(url.port)
+                return urlunsplit((url.scheme, host, url.path, "", ""))
+            except ValueError:
+                return "[redacted URL]"
+
+        report = {"schema_version": VERSION, "kind": "storylens_diagnostics",
+                  "source": str(self.source), "project": str(self.directory),
+                  "mode": self.mode, "depth": self.depth,
+                  "settings": {name: getattr(self.config, name) for name in
+                               ("timeout", "semantic_timeout", "embedding_model", "vision_model",
+                                "audio_transcription_model", "audio_transcription_device",
+                                "audio_transcription_language")},
+                  "technical": self.analysis_status("technical"), "ai": self.analysis_status("ai"),
+                  "privacy": "Local report contains source paths and filenames. Review before sharing."}
+        report = json.loads(re.sub(r"https?://[^\s\"<>]+", safe_url, json.dumps(report)))
+        self._layout()
+        path = self.directory / ("diagnostics-" + uuid4().hex + ".json")
+        self._write_new(path, report)
+        return {"path": str(path), "report": report}
 
     def recommend(self, *, duration_seconds=60, strategy="balanced"):
         with Analyzer(self.config) as app:

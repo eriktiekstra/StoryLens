@@ -55,7 +55,8 @@ class SemanticTests(unittest.TestCase):
         self.blue = self.media / "blue.png"
         Image.new("RGB", (32, 24), "red").save(self.red)
         Image.new("RGB", (32, 24), "blue").save(self.blue)
-        self.app = Analyzer(Config(self.root / "catalog.sqlite3"))
+        self.app = Analyzer(Config(self.root / "catalog.sqlite3",
+                                   embedding_model="fixture-embeddings", vision_model="fixture-vision"))
         self.addCleanup(self.app.catalog.close)
         self.encoder, self.vision = FixtureEncoder(), FixtureVision()
         self.app._embeddings, self.app._vision = self.encoder, self.vision

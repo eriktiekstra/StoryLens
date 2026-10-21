@@ -2,41 +2,56 @@
 
 Local-first, editor-independent media intelligence. MIT licensed; free to self-host.
 
-Current package: 0.10.0 — local media analysis, events/corrections, portable storyboards and release/benchmark tooling, with a loopback browser wizard for analysis and handoff. Run `storylens` to create or resume a separate private local project. Sources remain read-only. The browser path uses technical analysis without AI inference; optional local models remain available through the analysis APIs and scriptable commands. No automatic model downloads, cloud fallback, telemetry, subscriptions or accounts.
+StoryLens analyzes photos, videos and audio without changing the originals. Start with basic analysis, then optionally add local AI to the same project. A guided terminal wizard and a local browser interface share saved results, settings and recovery actions. There are no accounts, subscriptions, telemetry or cloud fallback. Model downloads happen only after explicit approval.
 
 Editable JSON storyboards work without an editor. For creative decisions and editing, the wizard supplies a StoryLens MCP configuration snippet and a prompt to copy to your existing AI host. Your agent uses StoryLens evidence and calls the official FilmCraft MCP directly; StoryLens does not run an agent, launch FilmCraft, create native editor projects or render/export movies. See [handoff and consent](docs/INTEGRATIONS.md#agent-handoff-and-media-consent), [architecture](ARCHITECTURE.md), [milestones](docs/IMPLEMENTATION_PLAN.md), and primary-source research for [components](docs/research/media-ecosystem.md), [existing applications](docs/research/existing-applications.md), and [FilmCraft/MCP](docs/research/filmcraft-mcp.md).
 
 ## Installation
 
-Requires Python 3.11+, Pillow and NumPy. Install a trusted FFmpeg build for audio/video probing and video technical analysis; both ffprobe and ffmpeg must be on PATH or explicitly configured. Image-only processing needs neither binary. FFmpeg is not bundled or downloaded by StoryLens.
+You need **Python 3.11 or newer**. Videos and audio also need **FFmpeg**, which includes both `ffmpeg` and `ffprobe`. Photos in Apple HEIC/HEIF format need the optional decoder included in the installation below.
 
-From a source checkout on Linux/macOS:
+1. Install Python and FFmpeg:
+   - **macOS:** with [Homebrew](https://brew.sh), run `brew install python ffmpeg`.
+   - **Windows:** install Python from [python.org](https://www.python.org/downloads/), then install a trusted FFmpeg build; for example `winget install --id Gyan.FFmpeg --exact`. Reopen your terminal afterward.
+   - **Ubuntu/Debian:** `sudo apt install python3 python3-venv ffmpeg`. Other Linux distributions use their own package manager.
+2. Create an isolated StoryLens environment and install from this repository:
 
 ~~~sh
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-storylens --help
+python3 -m venv ~/.venvs/storylens
+. ~/.venvs/storylens/bin/activate
+python -m pip install "storylens[heif] @ https://github.com/eriktiekstra/StoryLens/archive/refs/heads/main.zip"
+storylens
 ~~~
 
-Windows PowerShell: use py -3 -m venv .venv, then .venv\Scripts\Activate.ps1 and the same pip commands. If Linux venv reports missing ensurepip, install your distribution's Python venv package. No PyPI release or signed desktop installer is claimed yet.
+On **Windows PowerShell**, use these commands instead:
 
-Optional HEIF support: `python -m pip install -e '.[heif]'` from a checkout, or `python -m pip install 'pillow-heif>=1,<2'` in the installed StoryLens environment. The wizard warns before analysis when it detects HEIC/HEIF files without this decoder. The default per-ffprobe/ffmpeg timeout is 600 seconds; override it with `STORYLENS_TIMEOUT` before creating a project. Existing projects keep their saved timeout. See [formats](docs/USAGE.md#media-support).
+~~~powershell
+py -3 -m venv "$HOME\.venvs\storylens"
+& "$HOME\.venvs\storylens\Scripts\Activate.ps1"
+python -m pip install "storylens[heif] @ https://github.com/eriktiekstra/StoryLens/archive/refs/heads/main.zip"
+storylens
+~~~
+
+Activate this environment again in a new terminal before running `storylens`. This is a repository installation, not a claimed PyPI release or signed desktop installer. If you already have a source checkout, use `python -m pip install -e '.[heif]'` from its root instead.
 
 ## Quick start
 
-With the environment activated, open the local browser wizard:
+Run `storylens` to choose **Open browser** or **Continue in terminal**. You can also open either interface directly:
 
 ~~~sh
-storylens
-# Explicit equivalent, including when resuming a saved project:
-storylens wizard
-storylens wizard --project "$HOME/storylens-projects/holiday"
+storylens wizard --web
+storylens wizard --terminal
+# Reopen saved results without repeating successful analysis:
+storylens wizard --web --project "$HOME/storylens-projects/holiday"
 ~~~
 
-The wizard asks for a mixed-media folder and a separate local project directory, checks prerequisites, and runs local metadata/technical analysis with progress and results. Interrupted analysis can reuse completed stage caches. It then provides a StoryLens MCP server snippet pointing at that project's catalog and a prompt to copy into your existing MCP-capable agent. [Wizard operation](docs/USAGE.md#guided-project-wizard).
+Both interfaces guide you through choosing folders, checking readiness, analysis, and using the results. Choose the folder containing your mixed photos/videos, then a separate local project folder. StoryLens creates the project folder; your media stays where it is and remains unchanged.
 
-The browser page is served on `127.0.0.1` only; the terminal prints its private session URL if automatic opening is unavailable. Keep the process running while using it, and stop it with Ctrl-C. Media-inspection permission in the copied prompt is opt-in and does not authorize cloud sharing: separately approve any disclosure of media or private analysis to your host's provider. The wizard does not connect to your agent or FilmCraft.
+Start with **basic analysis**, which needs no AI models. If files fail, inspect the explanation, adjust saved timeout settings or install the missing decoder, then choose retry. Successful stages are reused; you do not need to start over.
+
+You can **add local AI later** for image descriptions, visual search, or speech transcription. The wizard explains supported models, approximate download sizes and requirements; detects reusable settings; checks setup; and offers an explicit small sample before collection processing. Model downloads and profile reuse are separate actions. AI results and failures are tracked separately from basic analysis. See the [wizard guide](docs/USAGE.md#guided-project-wizard).
+
+The browser runs only on your computer at `127.0.0.1`; its private URL is printed in the terminal. Leave that terminal open while using the page. Both interfaces can save a private diagnostic report and open the project folder. The optional final handoff helps connect your existing agent; it does not launch the agent or FilmCraft, and permission to inspect media does not authorize cloud sharing.
 
 ### Connect your existing MCP host
 
@@ -93,7 +108,7 @@ Scene JPEGs live in a catalog-adjacent .artifacts directory. Missing JPEGs cause
 
 ## Optional local semantics
 
-Install the optional runtime with `python -m pip install -e ".[semantic]"`; stage a trusted local Transformers CLIP/SigLIP model directory separately. STANDARD/DEEP additionally require an installed Ollama vision model and a daemon configured with `OLLAMA_NO_CLOUD=1`, restarted, whose `/api/status` reports cloud disabled. [Setup and limits](docs/INTEGRATIONS.md#local-ai-setup-m3).
+The wizard can configure local AI before analysis or enrich an existing project afterward. For manual setup from a checkout, install `python -m pip install -e ".[semantic]"` for visual search or `python -m pip install -e ".[transcription]"` for speech. Recommended-model downloading additionally needs the `model-installer` extra. Image descriptions use a separately installed local Ollama vision model and a daemon configured with `OLLAMA_NO_CLOUD=1`, restarted, whose `/api/status` reports cloud disabled. Select only the capabilities you need; they run independently. [Setup and limits](docs/INTEGRATIONS.md#local-ai-setup-m3).
 
 ~~~sh
 storylens --embedding-model /models/siglip analyze /mounted/media --depth fast

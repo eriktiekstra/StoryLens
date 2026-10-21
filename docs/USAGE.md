@@ -2,30 +2,59 @@
 
 ## Guided project wizard
 
-Run `storylens`, or the explicit equivalent `storylens wizard`, to open the local browser wizard. No separate scan/analyze commands are needed for this path:
+Run `storylens` and choose **Open browser** or **Continue in terminal**. No separate scan/analyze commands are needed:
 
 ~~~sh
-storylens
-storylens wizard --source "/mounted/holiday" --project "$HOME/storylens-projects/holiday"
-# Reopen the same project, retaining caches, feedback and saved edits:
-storylens wizard --project "$HOME/storylens-projects/holiday"
+storylens wizard --web
+storylens wizard --terminal
+storylens wizard --web --source "/mounted/holiday" --project "$HOME/storylens-projects/holiday"
+# Reopen the same saved project in either interface:
+storylens wizard --terminal --project "$HOME/storylens-projects/holiday"
 ~~~
 
-Choose an existing mixed-media source folder and a separate private local project directory. Keep project state local and outside the source folder, especially when media is on a NAS. The browser checks recognized source counts and required tools, then waits for you to start analysis. New projects never adopt the global catalog or overwrite an unrelated existing directory.
+Both interfaces use the same saved project and analysis operations. In the terminal, enter the displayed number/letter; `:back` or `:cancel` returns to the previous choice and `:quit` leaves without discarding saved work. Directory Tab completion is available where the platform's readline implementation supports it. The browser has a local folder browser: this selects paths on the computer running StoryLens, not uploaded files.
 
-The browser path performs metadata and technical analysis without model inference, even when model paths are configured. It reads sources but never modifies them. Optional local semantic analysis, transcription, corrections and editable storyboards remain available through the scriptable CLI, Python service and MCP tools; they are not a hidden AI step in the wizard.
+### Choose folders and check readiness
 
-Preflight warns about HEIC/HEIF files without the optional `pillow-heif` decoder and supplies the install command. Install it into the environment providing `storylens`. The default per-FFmpeg/ffprobe timeout is 600 seconds. Set `STORYLENS_TIMEOUT` before creating a project to change it; existing projects retain their saved timeout.
+Select the existing folder containing your mixed photos/videos/audio. Accept or edit the suggested local project location. StoryLens creates a new project folder automatically, including missing parent directories. Keep it separate from the source, particularly for NAS media. Existing unrelated folders are never overwritten; choose a new subfolder or open a folder that already contains a StoryLens project.
 
-Analysis shows actual indexed/analyzed/cached/failed checkpoint counts and results. Partial failures remain visible; inspect the error list before relying on the remaining evidence. Reopen the same project and explicitly run analysis again to reuse successful stage caches. Project state and catalog remain local; do not run multiple writers against a project. Only open trusted project/config files because configuration selects local executables.
+Readiness shows recognized media counts, available tools and installation instructions. FFmpeg supplies **both ffmpeg and ffprobe**. HEIC/HEIF photos need the optional decoder; install it into the Python environment providing StoryLens. No package manager is run automatically.
 
-After analysis, copy the provided StoryLens MCP configuration snippet into your existing host, then copy the handoff prompt to that agent. The snippet uses the current project's `catalog.sqlite3`, not a global catalog; install the optional MCP extra before your host launches it. See [host-specific configuration](INTEGRATIONS.md#mcp-setup-for-codex-and-claude-code). Configure the official FilmCraft MCP separately in that host. StoryLens does not launch or control either your agent or FilmCraft and does not create native projects, render previews or export movies.
+### Run basic analysis and recover from failures
 
-The handoff's media-inspection checkbox is off by default. Without explicit consent, the prompt tells your agent not to open/decode original media; technical metrics alone cannot establish subjective clip quality, people, emotion or visual continuity. Opt in only for the source collection you want the agent to inspect. This is a copied instruction, not a security sandbox or a file transfer. Cloud-provider disclosure is a separate approval: media, frames, transcripts, metadata and paths can all be private, and inspection consent does not authorize their upload. [Consent details and example prompt](INTEGRATIONS.md#agent-handoff-and-media-consent).
+Basic analysis uses metadata and local signal measurements, with **no model inference**, even when the project has AI models configured. Progress shows observed counts, elapsed time and current activity. Indexed counts are not an estimated percentage of completed analysis.
 
-The wizard binds to `127.0.0.1` on a local port and attempts to open your browser. If that fails, open the private URL printed in the terminal on the same computer. Keep its session URL/token private; do not expose the listener through a proxy, port forwarding or a LAN bind. Leave the process running while using the page; stop it with Ctrl-C. Closing the tab does not itself stop the process. The loopback page is separate from the stdio MCP server.
+Use **Stop safely** in the browser or Ctrl-C during terminal analysis. Cancellation is cooperative at safe checkpoints; a running native/model call may need to finish first. Completed stages remain cached. Reopen the same project to view saved results, resume, or retry. Do not run multiple writers against the same project.
 
-Bare `storylens` in an interactive terminal opens the same browser workflow as `storylens wizard`; a bare invocation in a pipeline prints help instead of blocking. Explicit browser-wizard startup requires an interactive terminal. `--help`, `--version`, existing subcommands and JSON APIs retain their scriptable behavior. `--json` and an explicit global `--database` are rejected for wizard mode: select its `--project` instead. `wizard --source`/`--project` pre-fill browser fields; they do not skip the analysis decision or authorize agent/cloud access.
+Partial results are not complete success. Review failed filenames and their explanations. Fix inaccessible/corrupt files or missing decoders, or increase saved timeout settings, then retry. Retry rechecks the source collection and reuses successful stages; it does not force a full rebuild. Default external-tool timeout is 600 seconds and local vision request timeout is 120 seconds. Change these through the wizard; existing projects do not silently adopt later environment-variable changes.
+
+Use **Open project folder** to find `project.json`, `catalog.sqlite3`, and derived analysis artifacts. Keep the whole project folder when moving or backing it up. **Save diagnostic report** writes a new private `diagnostics-*.json` file there. It contains local paths/errors and is never uploaded; review it before sharing.
+
+### Add local AI now or later
+
+After basic analysis, choose **Add or adjust local AI** in the browser or **Set up optional local AI** in the terminal. The same project can be enriched later without deleting its basic results. Select only what you need:
+
+- **Image descriptions:** a local Ollama vision model describes images and sampled video frames.
+- **Visual search:** a local CLIP/SigLIP encoder supports finding related images and video moments.
+- **Speech transcription:** a local faster-whisper model transcribes supported audio/video tracks.
+
+The setup explains recommended models, approximate download sizes, storage and hardware expectations. CPU is the starting point, not a promise of acceptable speed on every machine. Install optional Python dependencies with the exact command shown for the StoryLens interpreter. For vision, install Ollama separately, set `OLLAMA_NO_CLOUD=1` for its daemon, and restart it; StoryLens checks cloud-disabled status at a numeric loopback endpoint.
+
+Detected existing models can be reused. **Get recommended model** requires explicit download consent and may contact Hugging Face or your local Ollama runtime's model registry. Source media and private project paths are not sent to model hosts. Model downloads are separate from inference; ordinary analysis never downloads missing weights.
+
+Follow **Check setup → Test on a sample → Save AI setup → Run local AI enrichment**. The sample explicitly processes a small local source/proxy, not the entire collection, and does not change catalog results. It is bounded to one visual source and at most 15 seconds of speech input per capability, with a maximum five-minute sample deadline per capability. A successful dependency check is not hardware certification.
+
+Save a **reusable AI profile** to avoid entering model paths again. Loading a profile is explicit, and only applying it to a project enables those capabilities. Model choices can be changed later; stage caches select results by model/content/settings identity. Basic and AI statuses are saved separately. AI failures do not erase successful basic results or successful sibling AI stages.
+
+### Use the results with your existing agent
+
+The optional handoff supplies setup instructions, a project-specific StoryLens MCP configuration and a prompt. Install the optional MCP dependency in this environment and configure both StoryLens and the official FilmCraft MCP in your existing trusted host. StoryLens does not launch the agent, create native editor projects, or render/export movies. See [host-specific setup](INTEGRATIONS.md#mcp-setup-for-codex-and-claude-code).
+
+Original-media inspection is off by default in the prompt. Opting in changes the copied instruction, not filesystem permissions. The MCP configuration authorizes the selected host to query the approved source root; configure only hosts you trust. Cloud/provider disclosure of media, frames, paths, transcripts or analysis needs separate approval. [Consent details](INTEGRATIONS.md#agent-handoff-and-media-consent).
+
+The browser binds only to `127.0.0.1`, uses a private session URL/token, and checks request host/origin. Keep the terminal running; closing the tab does not stop the server. Do not publish or forward the URL, expose it through a proxy, or bind it to a LAN. This local UI is separate from MCP's stdio transport.
+
+Bare `storylens` in a pipeline prints help rather than prompting. Explicit wizard startup requires an interactive terminal. `--help`, `--version`, scriptable commands and JSON APIs remain independent. Wizard mode rejects `--json` and an explicit global `--database`; choose `--project` instead.
 
 ## CLI reference
 
@@ -33,7 +62,7 @@ Global options precede the command: storylens [OPTIONS] COMMAND ... .
 
 | Command | Behavior |
 | --- | --- |
-| wizard [--source DIR] [--project DIR] | Local browser analysis and agent handoff; also the default for bare storylens |
+| wizard [--web / --terminal] [--source DIR] [--project DIR] | Guided local analysis, optional later AI enrichment, recovery and external-agent handoff; bare interactive storylens offers an interface choice |
 | scan PATH | Recursively index recognized files and full SHA-256 identities; no media decode |
 | analyze PATH [--stage all/metadata/technical/semantic/transcript] [--depth fast/standard/deep] [--force] | Independently cached stages; defaults to metadata+technical; semantics/transcription require opt-in model configuration |
 | list [--kind image/video/audio] [--limit N] [--after CURSOR] | Bounded identity page; default 50, maximum 500 |
@@ -130,7 +159,7 @@ Artifacts live under the catalog's basename with .artifacts suffix, grouped by c
 
 ## Local semantics and retrieval
 
-Install and stage the local models deliberately as described in [integration setup](INTEGRATIONS.md#local-ai-setup-m3). Inference is opt-in; `--depth` is valid only with all/semantic analysis, never metadata/technical/transcript. FAST performs embeddings without captions. STANDARD and DEEP run independently cached `semantic_embeddings` and `semantic_vision` stages; a vision failure does not erase embeddings or technical results.
+Install local models deliberately as described in [integration setup](INTEGRATIONS.md#local-ai-setup-m3), or use either wizard's guided setup. Inference is opt-in; `--depth` applies to semantic/all analysis, not metadata/technical/transcript. FAST selects embeddings without captions; STANDARD/DEEP run whichever embedding/vision capabilities are configured. A vision failure does not erase embeddings or basic results.
 
 | Depth | Image | Video scene representatives | Tasks |
 | --- | --- | --- | --- |
@@ -150,7 +179,7 @@ Encoder loading/inference is synchronous on CPU without an enforceable per-call 
 
 ## Limits, hardware and NAS operation
 
-Default analysis uses no model/GPU; optional semantics adds local CPU encoder/model memory and an external loopback vision daemon. Processing is sequential; hashes read 1 MiB chunks. Image decoding may use substantial memory up to its source-pixel limit. Video permits <=16,777,216 source pixels, 1..32 audio channels, and max_scenes=256 by default (configurable). Scene-limit exceedance fails explicitly, never returns silently truncated complete analysis. Technical subprocesses have finite timeouts (default 30 seconds); raise timeout for long clips/NAS reads. Technical probe/error/JPEG payloads are bounded and timeline/audio output streamed. Metadata-only probing retains its original uncapped capture behavior; embedded metadata can still be large.
+Default analysis uses no model/GPU; optional semantics adds local CPU encoder/model memory and an external loopback vision daemon. Processing is sequential; hashes read 1 MiB chunks. Image decoding may use substantial memory up to its source-pixel limit. Video permits <=16,777,216 source pixels, 1..32 audio channels, and max_scenes=256 by default (configurable). Scene-limit exceedance fails explicitly, never returns silently truncated complete analysis. Technical subprocesses default to a 600-second timeout; change the saved timeout for slow files/NAS reads. Technical probe/error/JPEG payloads are bounded and timeline/audio output streamed. Metadata-only probing retains its original uncapped capture behavior; embedded metadata can still be large.
 
 Video timeline/cut passes decode content, not just container headers. Scene JPEGs use seeking and small derivatives. No general throughput/RAM floor is established; benchmark your codecs/NAS. Exclude @eaDir and snapshots. Default full hashing is I/O-expensive but detects same-size, same-mtime replacement; trust_stat explicitly weakens that guarantee. Use snapshots/quiescent libraries for consistency.
 

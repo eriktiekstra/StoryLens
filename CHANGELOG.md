@@ -2,13 +2,19 @@
 
 Entries describe capabilities and verification at that release, not active usage instructions. Later entries supersede earlier future-work lists; historical test counts and model smokes are not current verification guarantees. In particular, the FilmCraft adapter and terminal editor workflows recorded in 0.8.0/0.10.0 below have been removed.
 
-## Unreleased — local browser wizard and agent handoff
+## Unreleased — guided analyzer, local AI enrichment and agent handoff
 
-- Replaced the terminal questionnaire/editor flow with a loopback browser wizard, opened by both `storylens` and `storylens wizard`. It creates or reopens a separate private local project, runs technical analysis, and shows progress/results.
+- Added a new terminal wizard alongside the browser interface. Bare interactive `storylens` offers an interface choice; `wizard --web` and `wizard --terminal` open either directly. Both share saved projects, settings, progress, recovery, diagnostics and agent handoff.
+- Added capability-based local AI setup for visual search, image descriptions and speech transcription, including enrichment after basic analysis. Installed models, dependency checks, explicit profile reuse and bounded read-only sample inference are available in both interfaces. Optional recommended-model acquisition requires explicit consent; Python packages are never installed automatically.
+- Added validated project settings updates and manifest v3 migration with separate basic/AI statuses. Successful basic and sibling AI evidence survives model failures; retries reuse current stage caches. Speech enrichment includes video audio tracks and preserves source timestamps; videos without usable audio do not require a speech model.
+- Added authenticated local folder browsing, editable suggested project locations, saved-result restoration, real elapsed/activity display, safe cooperative stop, saved timeout controls and private diagnostics reports. Simplified terminal menus and neutralized control characters in displayed paths/model text.
+- Reworked first-run installation and usage instructions for nontechnical users. Real Linux terminal/browser and local-model execution are recorded separately from macOS/Windows, private-media, NAS/GPU and model-quality acceptance.
+
 - Added an explicit handoff: a project-specific StoryLens MCP configuration snippet pointing at `<project>/catalog.sqlite3` and a prompt to copy to the user's existing MCP agent. StoryLens does not launch that agent or FilmCraft; the host owns creative decisions and calls the official FilmCraft MCP directly.
 - Made original-media inspection opt-in in the copied prompt. Inspection permission does not authorize cloud/provider disclosure; media and private analysis require separate user approval before sharing.
 - Removed the package-owned FilmCraft CLI/transport/adapter, native-project creation and transcript parsing, preview/movie export APIs, and wizard editor steps. Ordinary analysis, supplied JSON/SRT/VTT transcript import/export, local model APIs, events/corrections, portable storyboards, MCP services and benchmarks remain available.
-- Updated current product, usage, API and architecture documentation. Earlier editor/runtime evidence remains historical and does not verify the new browser path or a user's host/server configuration.
+- Updated current product, usage, API, security and architecture documentation. Earlier editor/runtime evidence remains historical and does not verify the current wizard paths or a user's host/server configuration.
+- Verification: all 375 regression tests passed on Linux/Python 3.12. Built and installed the wheel into an isolated core environment and exercised the real first-run terminal flow. Browser acceptance covered real local-model enrichment, refresh/resume, safe stop/retry, diagnostics, and a 390px layout without horizontal overflow. Real-model execution is not a model-accuracy or cross-platform certification.
 
 ## 0.10.0 — 2026-10-20 (guided terminal projects)
 

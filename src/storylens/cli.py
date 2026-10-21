@@ -13,7 +13,10 @@ from .service import Analyzer
 
 def parser():
     cli = argparse.ArgumentParser(prog="storylens", allow_abbrev=False,
-                                  description="StoryLens: local media analysis and semantic retrieval")
+                                  description="StoryLens: local media analysis and semantic retrieval",
+                                  epilog="Run storylens in a terminal to choose a local browser or terminal wizard. "
+                                         "Use 'storylens wizard --web' or 'storylens wizard --terminal' to skip the choice. "
+                                         "Without a terminal, use the individual commands below for scripting.")
     cli.add_argument("--version", action="version", version=__version__)
     cli.add_argument("--config", type=Path, help="TOML configuration file")
     cli.add_argument("--database", type=Path, help="Local SQLite catalog path")
@@ -35,7 +38,11 @@ def parser():
     cli.add_argument("--trust-stat", action=argparse.BooleanOptionalAction, default=None, help="Reuse identity for matching size/mtime (weaker than hashing)")
     cli.add_argument("--json", action="store_true", help="Machine-readable versioned JSON")
     commands = cli.add_subparsers(dest="command")
-    wizard = commands.add_parser("wizard", help="Open the local browser workflow for analysis and agent handoff")
+    wizard = commands.add_parser("wizard", help="Choose a friendly browser or terminal workflow",
+                                description="Analyze a private project with a local browser or terminal wizard.")
+    interface = wizard.add_mutually_exclusive_group()
+    interface.add_argument("--web", action="store_true", help="Open the local browser wizard (skip the interface choice)")
+    interface.add_argument("--terminal", action="store_true", help="Stay in the terminal (no browser required)")
     wizard.add_argument("--project", type=Path, help="New or existing private project directory")
     wizard.add_argument("--source", type=Path, help="Source collection directory for a new project")
     for name in ("scan", "analyze"):
@@ -168,20 +175,21 @@ def main(argv=None):
     args = cli.parse_args(argv)
     if args.command is None:
         if args.json:
-            emit({"schema_version": "1.0", "error": "The browser wizard does not support --json; use individual commands for automation"}, True)
+            emit({"schema_version": "1.0", "error": "The interactive wizard does not support --json; use individual commands for automation"}, True)
             return 1
         if not sys.stdin.isatty() or not sys.stdout.isatty():
             cli.print_help()
             return 0
         args.command, args.project, args.source = "wizard", None, None
+        args.web, args.terminal = False, False
     try:
         if args.command == "wizard":
             if args.json:
-                raise ValueError("The browser wizard does not support --json; use individual commands for automation")
+                raise ValueError("The interactive wizard does not support --json; use individual commands for automation")
             if args.database is not None:
-                raise ValueError("The browser wizard manages a project-local catalog; choose wizard --project instead of --database")
+                raise ValueError("The wizard manages a project-local catalog; choose wizard --project instead of --database")
             if not sys.stdin.isatty() or not sys.stdout.isatty():
-                raise ValueError("The browser wizard requires an interactive terminal; use scriptable commands in pipelines")
+                raise ValueError("The wizard requires an interactive terminal; use scriptable commands in pipelines")
         config = load_config(args.config, database=args.database, ffprobe=args.ffprobe, ffmpeg=args.ffmpeg,
                              timeout=args.timeout, exclusions=args.exclusions, trust_stat=args.trust_stat,
                              scene_threshold=args.scene_threshold, minimum_scene_seconds=args.minimum_scene_seconds, max_scenes=args.max_scenes,
@@ -190,7 +198,14 @@ def main(argv=None):
                              max_audio_seconds=args.max_audio_seconds, audio_transcription_model=args.audio_transcription_model,
                              audio_transcription_device=args.audio_transcription_device, audio_transcription_language=args.audio_transcription_language)
         if args.command == "wizard":
-            from .web_wizard import run
+            from .terminal_wizard import choose_interface
+            interface = "web" if args.web else "terminal" if args.terminal else choose_interface()
+            if interface is None:
+                return 0
+            if interface == "web":
+                from .web_wizard import run
+            else:
+                from .terminal_wizard import run
             return run(config, project=args.project, source=args.source)
         if args.command == "benchmark":
             from . import benchmark

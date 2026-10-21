@@ -1,5 +1,6 @@
 """Shared application service, independent of CLI and editor transports."""
 
+from concurrent.futures import CancelledError
 import base64
 import hashlib
 import json
@@ -17,6 +18,8 @@ from .transcripts import load_transcript, serialize
 class Analyzer:
     def __init__(self, config: Config):
         self.config = config
+        self.activity = ""
+        self.basic_summary = None
         self.catalog = Catalog(config.database)
         self.extractor = MetadataExtractor(config.ffprobe, config.timeout)
         self.artifact_root = config.database.resolve().with_suffix(".artifacts")
@@ -66,42 +69,56 @@ class Analyzer:
         return all(Path(scene["representative_frame"]["path"]).is_file()
                    for scene in result["scenes"])
 
-    def scan(self, root: Path, *, analyze=False, force=False, stage="all", depth=None, checkpoint=None):
-        if stage not in {"metadata", "technical", "semantic", "transcript", "all"}:
-            raise ValueError("stage must be metadata, technical, semantic, transcript or all")
+    def scan(self, root: Path, *, analyze=False, force=False, stage="all", depth=None,
+             checkpoint=None, cancelled=None):
+        if stage not in {"metadata", "technical", "semantic", "transcript", "ai", "all"}:
+            raise ValueError("stage must be metadata, technical, semantic, transcript, ai or all")
         if stage == "transcript" and not self.config.audio_transcription_model:
             raise ValueError("audio_transcription_model is required for transcript stage")
         from .semantics import DEPTHS
         if depth is not None and depth not in DEPTHS:
             raise ValueError("depth must be fast, standard or deep")
-        if depth is not None and stage not in {"semantic", "all"}:
-            raise ValueError("depth applies only to semantic or all stages")
+        if depth is not None and stage not in {"semantic", "ai", "all"}:
+            raise ValueError("depth applies only to semantic, ai or all stages")
         if stage == "semantic" and depth is None:
             depth = "standard"
         root = root.expanduser().resolve(strict=True)
         summary = {"schema_version": "1.0", "root": str(root), "discovered": 0,
                    "indexed": 0, "analyzed": 0, "cache_hits": 0, "failed": 0,
                    "errors": [], "errors_truncated": False, "stages": {}}
+        basic = self.basic_summary = dict(summary, errors=[], stages={})
+        basic_stages = {"metadata", "image_technical", "video_technical", "audio_technical"}
 
-        def failure(path, error, failed_stage):
-            if len(summary["errors"]) < 100:
-                summary["errors"].append({"path": str(path), "stage": failed_stage,
-                                          "error": str(error)[:2000]})
-            else:
-                summary["errors_truncated"] = True
+        def check_cancelled():
+            if cancelled is not None and cancelled():
+                raise CancelledError("Analysis cancelled; completed stages are saved and can be resumed")
 
+        def failure(path, error, failed_stage, *, basic_failure=False):
+            entry = {"path": str(path), "stage": failed_stage, "error": str(error)[:2000]}
+            for report in (summary, basic) if basic_failure else (summary,):
+                if len(report["errors"]) < 100:
+                    report["errors"].append(entry)
+                else:
+                    report["errors_truncated"] = True
+
+        check_cancelled()
+        self.activity = "Discovering source media"
         if checkpoint is not None:
             checkpoint(summary)
         for entry in discover(root, self.config.exclusions):
+            check_cancelled()
+            self.activity = "Inspecting " + entry.name if isinstance(entry, Path) else "Reading source directory"
             if checkpoint is not None:
                 checkpoint(summary)
             if isinstance(entry, OSError):
                 summary["failed"] += 1
-                failure(getattr(entry, "filename", root), entry, "ingestion")
+                basic["failed"] += 1
+                failure(getattr(entry, "filename", root), entry, "ingestion", basic_failure=True)
                 continue
             if entry.is_relative_to(self.artifact_root):
                 continue
             summary["discovered"] += 1
+            basic["discovered"] += 1
             try:
                 before = snapshot(entry)
                 known = self.catalog.known_path(entry)
@@ -114,30 +131,40 @@ class Analyzer:
                 self.catalog.observe(media_id, entry, kind(entry), before)
             except (OSError, ValueError) as error:
                 summary["failed"] += 1
-                failure(entry, error, "ingestion")
+                basic["failed"] += 1
+                failure(entry, error, "ingestion", basic_failure=True)
                 continue
             summary["indexed"] += 1
+            basic["indexed"] += 1
             if not analyze:
                 continue
             selected = []
-            if stage in {"metadata", "all"}:
+            if stage in {"metadata", "ai", "all"} or (stage == "transcript" and kind(entry) == "video"):
                 selected.append(("metadata", self.extractor))
-            if stage in {"technical", "all"} or (stage == "semantic" and kind(entry) in {"video", "audio"}):
+            if stage in {"technical", "ai", "all"} or (stage in {"semantic", "transcript"} and kind(entry) == "video"):
                 technical = self._technical(kind(entry))
                 if technical is not None:
                     selected.append(technical)
             if depth is not None and kind(entry) in {"image", "video"}:
-                selected.append(("semantic_embeddings", None))
-                if depth != "fast":
+                if self.config.embedding_model:
+                    selected.append(("semantic_embeddings", None))
+                if depth != "fast" and self.config.vision_model:
                     selected.append(("semantic_vision", None))
-            if kind(entry) == "audio" and self.config.audio_transcription_model and stage in {"transcript", "all"}:
+            if kind(entry) in {"audio", "video"} and self.config.audio_transcription_model and stage in {"transcript", "ai", "all"}:
                 selected.append(("audio_transcription", None))
             file_failed, computed, hits = False, False, 0
+            basic_failed, basic_computed, basic_hits, skipped = False, False, 0, 0
+            basic_selected = sum(name in basic_stages for name, _ in selected)
             failed_stages = set()
             for stage_name, extractor in selected:
+                check_cancelled()
+                self.activity = stage_name.replace("_", " ").capitalize() + ": " + entry.name
                 if checkpoint is not None:
                     checkpoint(summary)
                 counts = summary["stages"].setdefault(stage_name, {"analyzed": 0, "cache_hits": 0, "failed": 0})
+                is_basic = stage_name in basic_stages
+                if is_basic:
+                    basic["stages"][stage_name] = counts
                 try:
                     if stage_name.startswith("semantic_"):
                         from .semantics import SemanticExtractor
@@ -153,6 +180,22 @@ class Analyzer:
                         task = stage_name.removeprefix("semantic_")
                         extractor = SemanticExtractor(self._semantic_provider(task), depth, task, video, video_key)
                     if stage_name == "audio_transcription":
+                        if kind(entry) == "video":
+                            if "video_technical" in failed_stages:
+                                raise ValueError("Current video technical analysis failed; audio presence cannot be inferred from stale evidence")
+                            _, technical = self._technical("video")
+                            video = self.catalog.stage_result(media_id, "video_technical", technical.cache_key())
+                            if video is None:
+                                raise ValueError("Video transcription requires successful current video technical analysis")
+                            if signature(snapshot(entry)) != signature(before):
+                                raise ValueError("Source changed before checking video audio")
+                            audio = video["measurements"]["audio"]
+                            audio_status = audio["status"]
+                            if audio_status == "no_audio" or (audio_status == "measured" and audio.get("digital_silence") is True):
+                                skipped += 1
+                                continue
+                            if audio_status != "measured":
+                                raise ValueError("Video transcription requires measured current audio evidence")
                         extractor = AudioModelExtractor(
                             "transcription", self.config.audio_transcription_model,
                             ffmpeg=self.config.ffmpeg, ffprobe=self.config.ffprobe,
@@ -167,6 +210,7 @@ class Analyzer:
                     if not force and cached is not None and self._artifacts_available(stage_name, cached):
                         counts["cache_hits"] += 1
                         hits += 1
+                        basic_hits += int(is_basic)
                         continue
                     if stage_name == "metadata":
                         result = extractor.extract(entry, kind(entry))
@@ -187,19 +231,25 @@ class Analyzer:
                     self.catalog.fail(media_id, stage_name, str(error)[:2000])
                     counts["failed"] += 1
                     file_failed = True
-                    failure(entry, error, stage_name)
+                    basic_failed = basic_failed or is_basic
+                    failure(entry, error, stage_name, basic_failure=is_basic)
                     continue
                 # Storage failures escape rather than being mistaken for bad media.
-                if checkpoint is not None:
-                    checkpoint(summary)
                 self.catalog.save(media_id, stage_name, key, result)
                 counts["analyzed"] += 1
                 computed = True
+                basic_computed = basic_computed or is_basic
+                # Commit an extracted result before callbacks or cancellation can
+                # interrupt us. A resumed scan must not repeat successful inference.
                 if checkpoint is not None:
                     checkpoint(summary)
+                check_cancelled()
             summary["failed"] += int(file_failed)
             summary["analyzed"] += int(computed)
-            summary["cache_hits"] += int(bool(selected) and hits == len(selected))
+            summary["cache_hits"] += int(bool(selected) and hits == len(selected) - skipped)
+            basic["failed"] += int(basic_failed)
+            basic["analyzed"] += int(basic_computed)
+            basic["cache_hits"] += int(bool(basic_selected) and basic_hits == basic_selected)
         if checkpoint is not None:
             checkpoint(summary)
         return summary

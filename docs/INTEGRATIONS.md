@@ -2,15 +2,25 @@
 
 ## What is executable today
 
-StoryLens provides local indexing, technical/audio analysis, timestamped transcript import/export, opt-in CLIP/SigLIP retrieval/Ollama frame descriptions, local transcription, durable jobs, optional MCP stdio, coarse event grouping, durable manual events, independent corrections/preferences, and editable portable storyboards with separate scores. `storylens` / `storylens wizard` opens a loopback browser page for private local technical analysis and handoff to your existing agent. StoryLens does not run that agent or call FilmCraft. No cloud credentials or automatic model downloads exist. The inference-free profile remains [examples/local.toml](../examples/local.toml).
+StoryLens provides local indexing, technical/audio analysis, timestamped transcript import/export, opt-in CLIP/SigLIP retrieval/Ollama frame descriptions, local transcription, durable jobs, optional MCP stdio, coarse event grouping, corrections/preferences and editable portable storyboards. `storylens` / `storylens wizard` offers a terminal or loopback-browser interface for basic analysis, optional later local-AI enrichment, and handoff to your existing agent. StoryLens does not run that agent or call FilmCraft. There are no cloud credentials or automatic model downloads. The inference-free profile remains [examples/local.toml](../examples/local.toml).
 
 ## Local AI setup (M3)
+Both wizards offer guided setup: choose capabilities, detect installed models, check dependencies, explicitly test a small sample, then save and run enrichment on the existing project. Saving/loading reusable settings is separate from enabling AI in a project. Basic and AI statuses are persisted independently; model failure never erases successful technical stages.
+
+| Capability | Recommended setup | Approximate model download |
+|---|---|---|
+| Visual search | CPU CLIP ViT-B/32; `semantic` Python extra | 610 MB |
+| Image/frame descriptions | Separately installed, cloud-disabled Ollama with moondream | 1.8 GB |
+| Speech transcription | CPU int8 faster-whisper base; `transcription` Python extra | 150 MB |
+
+The `model-installer` Python extra enables recommended Hugging Face downloads. Acquisition requires explicit boolean consent; only fixed model repositories or a checked numeric-loopback Ollama runtime are used. Download size estimates are not RAM requirements or hardware certification. No source paths/media are sent to model hosts. Inference itself never downloads a missing model. Profiles are stored at `ai-profile.json` beside the platform-default StoryLens data location and contain only model settings, not project/source paths. See the [guided workflow](USAGE.md#add-local-ai-now-or-later).
+
 
 Install `python -m pip install -e ".[semantic]"` in a Python 3.11+ environment. PyTorch CPU is the encoder baseline; select a trusted CPU build for your platform. The optional extra adds Transformers 4.x, safetensors, SentencePiece and protobuf. Model/runtime licenses are separate from StoryLens; do not bundle weights without checking them.
 
 Stage a complete trusted Transformers **CLIP or SigLIP** directory explicitly: weights, config, processor and tokenizer files. Set `embedding_model` or `--embedding-model` to that directory, not a Hub name. Loading uses `local_files_only=True` and `trust_remote_code=False`, with no acquisition/fallback. A missing/incompatible runtime, incomplete directory or zero/nonfinite feature fails explicitly. CPU float32 and the slow processor are explicit for reproducibility. The provider fingerprints directory content and relevant library/preprocessing versions; moving identical files preserves embedding identity. Use immutable model snapshots. Changes during a run fail rather than storing results under the old identity.
 
-For captions, separately install a trusted Ollama release and deliberately install a **local vision-capable model**. Configure the daemon with `OLLAMA_NO_CLOUD=1` and restart it. Bind it to loopback; the StoryLens endpoint must use a numeric loopback origin, e.g. `http://127.0.0.1:11434` (not `localhost`, a LAN host or a proxy). `/api/status` must report `cloud.disabled: true`; older daemons without this evidence are rejected. `/api/tags` must identify a uniquely installed model digest and `/api/show` must advertise vision without remote/cloud routing metadata. No pulls, redirects, proxy environment handling or cloud fallback occur in StoryLens. The daemon/model are trusted local software, not a sandbox; use OS egress controls for a stronger offline boundary.
+For captions, separately install a trusted Ollama release and a **local vision-capable model**. Configure the daemon with `OLLAMA_NO_CLOUD=1` and restart it. The endpoint must use a numeric loopback origin such as `http://127.0.0.1:11434`. `/api/status` must report cloud disabled, `/api/tags` a unique installed model digest, and `/api/show` vision capability without remote/cloud routing. Inference never pulls models, follows redirects, routes through proxy environment variables or falls back to cloud. The separate consent-required setup action can pull the fixed recommended moondream model. The daemon/model remain trusted local software, not a sandbox; use OS egress controls for a stronger offline boundary.
 
 ~~~toml
 [storylens]
@@ -21,15 +31,17 @@ ollama_endpoint = "http://127.0.0.1:11434"
 semantic_timeout = 120.0
 ~~~
 
-Pass that file with `--config`; opt in with `analyze PATH --depth fast|standard|deep`. `--stage semantic` defaults to STANDARD and runs only semantic stages plus the video technical dependency when applicable. FAST requires only embeddings; STANDARD/DEEP also require vision. Default `analyze PATH` remains metadata+technical, with no inference. [Depth, retrieval and limits](USAGE.md#local-semantics-and-retrieval).
+Pass that file with `--config`; opt in with `analyze PATH --depth fast|standard|deep`. `--stage semantic` defaults to STANDARD and includes the video technical dependency. FAST selects embeddings without captions; STANDARD/DEEP run whichever embedding/vision capabilities are configured. Default analysis does not enable semantic inference; configured transcription remains an explicit opt-in. [Depth, retrieval and limits](USAGE.md#local-semantics-and-retrieval).
 
 ## Verification and limits
 
-Linux CPU inference was exercised with official `google/siglip-base-patch16-224` revision `7fd15f0689c79d79e38b1c2e2e2370a7bf2761ed` (Apache-2.0), Transformers 4.57.6 and PyTorch 2.14.1+cpu. Image/text features have 768 dimensions and unit norms; a direct encoder smoke denied every socket connection. Ollama 0.40.4 reported cloud disabled, advertised local vision capability and generated real captions with `moondream:latest` digest `55fc3abd386771e5b5d1bbcc732f3c3f4df6e9f9f08f1131f9cc27ba2d1eec5b` (Apache-2.0). Acquisition was a deliberate verification step into temporary directories, never an application behavior. [Pinned sources/setup](research/media-ecosystem.md).
+Historical Linux CPU inference used `google/siglip-base-patch16-224` revision `7fd15f0689c79d79e38b1c2e2e2370a7bf2761ed` (Apache-2.0), Transformers 4.57.6 and PyTorch 2.14.1+cpu. Image/text features have 768 dimensions and unit norms; a direct encoder smoke denied every socket connection. Ollama 0.40.4 reported cloud disabled and generated captions with `moondream:latest` digest `55fc3abd386771e5b5d1bbcc732f3c3f4df6e9f9f08f1131f9cc27ba2d1eec5b` (Apache-2.0). Model acquisition for that historical check was separate from the application; current guided setup additionally supports explicit consent-required acquisition. [Pinned sources/setup](research/media-ecosystem.md).
 
 An installed-CLI smoke analyzed three generated color images and a two-scene video, validated summary/export/search JSON against the schema, retrieved relevant color evidence for three text queries, matched a reference image to itself, and retained captions for scene representatives at source times 0.6 and 1.6 seconds. A final STANDARD rerun reused all four files' embeddings/captions and the video technical stage; source hashes stayed unchanged. Changing actual encoder-config content recomputed embeddings only and excluded old-space search rows. These small synthetic checks do not measure family-media relevance or caption truthfulness.
 
 These are correctness checks, not a broad accuracy benchmark or throughput claim. Moondream invented a white border on a plain red fixture; captions remain model_hypothesis with null confidence and must not drive factual identity/event conclusions. CLIP runtime execution, accelerator performance, multilingual retrieval and broad family-media accuracy are not established. Timestamped transcript import and optional local faster-whisper transcription are implemented independently of the semantic image stages.
+The shared-wizard enrichment smoke reused the installed SigLIP, moondream and tiny.en speech assets: basic mixed-media analysis, real visual-search/speech samples, AI enrichment, isolated missing-vision failure, and cached recovery retained source hashes and technical cache keys. The browser also completed basic analysis, restored results after refresh, and explicitly sampled/saved/enriched visual search. A vision-only project completed a real sample and enrichment without an embedding model. On this Linux CPU, a noisy-image vision sample exceeded 180 seconds; increasing the saved deadline to 300 seconds allowed the separate simple-image sample to complete. Moondream hallucinated structure in a flat-color image. These observations demonstrate recovery and runtime execution, not broad model accuracy or universal performance.
+
 
 ## Local audio and transcript setup (M4)
 
@@ -39,7 +51,7 @@ The direct Python AudioModelExtractor also supports diarization (pyannote.audio/
 
 ## Cloud-provider boundary
 
-StoryLens has no cloud-provider adapter or automatic cloud fallback. Its technical browser analysis runs locally without AI inference; optional semantic/transcription APIs use explicitly configured local models. An external agent host is a separate system: even StoryLens paths, metadata, captions or transcripts returned over MCP may be forwarded to the host's provider. Review that host's configuration and obtain separate consent for provider disclosure before sending private evidence. Permission to inspect original media does not authorize uploads, and the copied prompt is not an enforcement mechanism for the host's network access.
+StoryLens has no cloud-provider adapter or automatic cloud fallback. Basic analysis in either wizard runs locally without AI inference; optional enrichment uses explicitly configured local models. Model acquisition is a separate approved download, not a media upload. An external agent host is a separate system: StoryLens paths, metadata, captions or transcripts returned over MCP may be forwarded to its provider. Review that host's configuration and separately approve provider disclosure before sending private evidence. Permission to inspect original media does not authorize uploads, and the copied prompt cannot enforce the host's network behavior.
 
 ## MCP setup for Codex and Claude Code
 
